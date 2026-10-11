@@ -1,0 +1,161 @@
+import { useEffect, useState, type FormEvent, type ReactElement } from "react";
+import { acceptProposals, generateProposals, listSessions, saveSession } from "./api/client";
+import { activities, statuses, type PlanningRequest, type Session, type SessionInput } from "./api/types";
+import SessionTable from "./components/SessionTable";
+
+function localDate(date: Date): string {
+  // Calendar dates are local dates: converting to UTC could change the day.
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(day: string, count: number): string {
+  const date = new Date(`${day}T12:00:00`);
+  date.setDate(date.getDate() + count);
+  return localDate(date);
+}
+
+function initialMonday(): string {
+  const today = new Date();
+  today.setDate(today.getDate() - (today.getDay() + 6) % 7);
+  return localDate(today);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "The operation could not be completed.";
+}
+
+/** Render the weekly calendar list, session form, and manual proposal workflow.
+ *
+ * Returns
+ * -------
+ * ReactElement
+ *     Local planner interface with loading, validation, and preview states.
+ */
+export default function App(): ReactElement {
+  const [week, setWeek] = useState(initialMonday);
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [preview, setPreview] = useState<{ input: PlanningRequest; sessions: Session[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const validWeek = Boolean(week) && new Date(`${week}T12:00:00`).getDay() === 1;
+
+  useEffect(() => {
+    if (!validWeek) { setLoading(false); return; }
+    const controller = new AbortController();
+    setLoading(true);
+    listSessions(week, addDays(week, 6), controller.signal)
+      .then(setSessions)
+      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [week, revision, validWeek]);
+
+  async function run(operation: () => Promise<void>): Promise<void> {
+    setBusy(true); setError(""); setNotice("");
+    try { await operation(); } catch (cause) { setError(errorMessage(cause)); }
+    finally { setBusy(false); }
+  }
+
+  async function submitSession(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    const optionalNumber = (name: string): number | null => {
+      const value = String(fields.get(name) ?? "").trim();
+      return value === "" ? null : Number(value);
+    };
+    const session: SessionInput = {
+      day: String(fields.get("day")),
+      activity: fields.get("activity") as SessionInput["activity"],
+      status: fields.get("status") as SessionInput["status"],
+      duration_min: optionalNumber("duration"), effort: optionalNumber("effort"),
+      notes: String(fields.get("notes") ?? ""),
+    };
+    await run(async () => {
+      await saveSession(session);
+      setRevision((value) => value + 1);
+      setPreview(null);
+      setNotice("Session saved. Generate suggestions when you are ready.");
+      form.reset();
+    });
+  }
+
+  async function generate(): Promise<void> {
+    const input = { week_start: week, blocked: [...blocked] };
+    await run(async () => {
+      setPreview(null);
+      const proposed = await generateProposals(input);
+      setPreview({ input, sessions: proposed });
+    });
+  }
+
+  async function accept(): Promise<void> {
+    if (!preview) return;
+    await run(async () => {
+      await acceptProposals(preview.input, preview.sessions);
+      setPreview(null); setRevision((value) => value + 1);
+      setNotice("Suggestions accepted.");
+    });
+  }
+
+  return (
+    <main>
+      <header><p className="eyebrow">Adaptive Training Planner</p><h1>Make room for training.</h1>
+        <p>Record workouts and review suggestions around your availability.</p></header>
+      {error && <p className="message error" role="alert">{error}</p>}
+      {notice && <p className="message" role="status">{notice}</p>}
+      <section aria-labelledby="week-heading">
+        <h2 id="week-heading">Your week</h2>
+        <label>Week beginning (Monday)<input type="date" value={week} disabled={busy} required
+          onChange={(event) => {
+            setWeek(event.target.value); setBlocked([]); setPreview(null); setError(""); setNotice("");
+          }} /></label>
+        {!validWeek && <p role="alert">Select a Monday to view a week.</p>}
+        {validWeek && (loading ? <p role="status">Loading sessions…</p> : <SessionTable sessions={sessions} />)}
+      </section>
+      <section aria-labelledby="log-heading">
+        <h2 id="log-heading">Log or schedule a session</h2>
+        <form onSubmit={submitSession}><fieldset disabled={busy} className="form-grid">
+          <label>Date<input name="day" type="date" defaultValue={localDate(new Date())} required /></label>
+          <label>Activity<select name="activity">{activities.map((value) =>
+            <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+          <label>Status<select name="status">{statuses.map((value) =>
+            <option key={value} value={value}>{value}</option>)}</select></label>
+          <label>Duration in minutes (optional)<input name="duration" type="number" min="0" max="1440" step="1" /></label>
+          <label>Effort / RPE (optional)<input name="effort" type="number" min="1" max="10" step="1" /></label>
+          <label>Notes (optional)<input name="notes" type="text" /></label>
+          <button type="submit">Save session</button>
+        </fieldset></form>
+      </section>
+      <section aria-labelledby="proposal-heading">
+        <h2 id="proposal-heading">Suggestions</h2>
+        <p className="muted">Starter rules use whole days. These availability choices are temporary.</p>
+        <fieldset disabled={busy || !validWeek}><legend>Unavailable days</legend>
+          <div className="days">{validWeek && Array.from({ length: 7 }, (_, index) => {
+            const day = addDays(week, index);
+            return <label className="check" key={day}><input type="checkbox" checked={blocked.includes(day)}
+              onChange={(event) => {
+                setBlocked((values) => event.target.checked ? [...values, day] : values.filter((value) => value !== day));
+                setPreview(null);
+              }} />{day}</label>;
+          })}</div>
+        </fieldset>
+        <button disabled={busy || !validWeek || loading} onClick={generate}>Generate suggestions</button>
+        {preview && <div className="preview"><h3>Review your proposal</h3>
+          {preview.sessions.length === 0 ? <p>No available gaps under the current rules.</p> : <>
+            <SessionTable sessions={preview.sessions} />
+            <button disabled={busy} onClick={accept}>Accept this batch</button>
+          </>}
+          <button className="secondary" disabled={busy} onClick={() => setPreview(null)}>Dismiss preview</button>
+        </div>}
+      </section>
+    </main>
+  );
+}

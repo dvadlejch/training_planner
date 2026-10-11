@@ -1,0 +1,154 @@
+"""Application operations shared by HTTP routes and future interfaces."""
+
+from contextlib import closing
+from datetime import date, timedelta
+from pathlib import Path
+
+from training_planner.domain.models import Session
+from training_planner.planner.rules import suggest_week
+from training_planner.storage.db import connect, list_sessions, save_session
+
+
+class ProposalConflict(ValueError):
+    """Indicate that selected proposals no longer match the available calendar."""
+
+
+def get_sessions(path: Path, start: date, end: date) -> list[Session]:
+    """Read the saved calendar for an inclusive date range.
+
+    Parameters
+    ----------
+    path : Path
+        Database file location.
+    start : date
+        First included date.
+    end : date
+        Last included date.
+
+    Returns
+    -------
+    list[Session]
+        Sessions ordered by date and identifier.
+
+    Raises
+    ------
+    ValueError
+        If end precedes start or stored session values are invalid.
+    OSError
+        If the database directory cannot be created.
+    sqlite3.Error
+        If the database operation fails.
+    """
+    if end < start:
+        raise ValueError("end must be on or after start")
+    with closing(connect(path)) as conn:
+        return list_sessions(conn, start, end)
+
+
+def create_session(path: Path, session: Session) -> Session:
+    """Store a new manually entered workout.
+
+    Parameters
+    ----------
+    path : Path
+        Database file location.
+    session : Session
+        New workout with no database identifier and optional metrics.
+
+    Returns
+    -------
+    Session
+        Committed workout with its generated identifier.
+
+    Raises
+    ------
+    ValueError
+        If an identifier is supplied or metrics are outside their allowed ranges.
+    OSError
+        If the database directory cannot be created.
+    sqlite3.Error
+        If the database operation fails.
+    """
+    if session.id is not None:
+        raise ValueError("A new session must not have an id")
+    if session.duration_min is not None and not 0 <= session.duration_min <= 1440:
+        raise ValueError("duration_min must be between 0 and 1440")
+    if session.effort is not None and not 1 <= session.effort <= 10:
+        raise ValueError("effort must be between 1 and 10")
+    with closing(connect(path)) as conn, conn:
+        return save_session(conn, session)
+
+
+def generate_proposals(path: Path, week_start: date, blocked: set[date]) -> list[Session]:
+    """Generate a preview without saving any proposed workouts.
+
+    Parameters
+    ----------
+    path : Path
+        Database file location.
+    week_start : date
+        Monday starting the requested week.
+    blocked : set[date]
+        Ephemeral whole-day restrictions for this planning request.
+
+    Returns
+    -------
+    list[Session]
+        Unsaved suggestions from the existing starter rules.
+
+    Raises
+    ------
+    ValueError
+        If week_start is not a Monday or stored session values are invalid.
+    OSError
+        If the database directory cannot be created.
+    sqlite3.Error
+        If the database operation fails.
+    """
+    existing = get_sessions(path, week_start, week_start + timedelta(days=6))
+    return suggest_week(week_start, existing, blocked)
+
+
+def accept_proposals(
+    path: Path, week_start: date, blocked: set[date], proposals: list[Session]
+) -> list[Session]:
+    """Revalidate selected suggestions and commit the entire selection atomically.
+
+    Parameters
+    ----------
+    path : Path
+        Database file location.
+    week_start : date
+        Monday used to generate the preview.
+    blocked : set[date]
+        Whole-day restrictions used to generate the preview.
+    proposals : list[Session]
+        Unmodified suggestions selected for acceptance; an empty list is allowed.
+
+    Returns
+    -------
+    list[Session]
+        Committed sessions with generated identifiers.
+
+    Raises
+    ------
+    ProposalConflict
+        If selected suggestions are duplicated, altered, or no longer available.
+    ValueError
+        If week_start is not a Monday or stored session values are invalid.
+    OSError
+        If the database directory cannot be created.
+    sqlite3.Error
+        If the database operation fails; the entire selection is rolled back.
+    """
+    with closing(connect(path)) as conn, conn:
+        # Reserve the write transaction before reading so competing requests
+        # cannot book a proposed date between validation and insertion.
+        conn.execute("BEGIN IMMEDIATE")
+        existing = list_sessions(conn, week_start, week_start + timedelta(days=6))
+        available = suggest_week(week_start, existing, blocked)
+        if len({session.day for session in proposals}) != len(proposals):
+            raise ProposalConflict("Duplicate proposed dates; generate suggestions again")
+        if any(session not in available for session in proposals):
+            raise ProposalConflict("The calendar or proposals changed; generate suggestions again")
+        return [save_session(conn, session) for session in proposals]

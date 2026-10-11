@@ -1,0 +1,326 @@
+# Adaptive Training Planner
+
+> **Status: early local web prototype.** This README is primarily a **product specification** describing the intended application. Features described as *planned* are **not yet implemented**. See [Current implementation](#current-implementation) for what actually works today.
+
+## 1. Project overview
+
+Adaptive Training Planner is a local-first personal training calendar and recommendation application. It helps a user plan, log, and adapt strength and endurance training around an unpredictable work schedule, travel, other commitments, personal preferences, and recovery.
+
+The initial use case combines three weekly gym sessions, progressive running endurance and VO2 max development, and weekend hiking/cycling for long-distance and uphill fitness. The design should remain configurable, rather than hard-code this particular schedule for every user.
+
+**Product promise:** The app recommends training that fits the user's life. It never requires the user to exercise on a particular day, enter biometric data, or accept a suggested workout.
+
+## 2. Core product principles
+
+1. **Flexibility before rigid compliance.** Any day or portion of a day can be blocked, with no limits on how much time the user makes unavailable. A valid plan may contain fewer sessions than the user's targets, or even no workouts.
+2. **Suggestions, not commands.** Planning is initiated manually. A generated proposal is a draft until explicitly accepted. Declining suggestions is always allowed.
+3. **User control and preservation.** Previously accepted sessions are preserved during replanning by default; completed sessions are never silently modified. The user can intentionally edit, remove, reschedule, or unlock their own entries.
+4. **All fitness and readiness inputs are optional.** The app can generate conservative default suggestions without training history, fitness metrics, or recovery scores. Missing data means *unknown*, not zero, poor fitness, or low energy.
+5. **Progressive personalization.** Availability and preferences are used when provided; training history, performance metrics, and readiness refine recommendations when available.
+6. **Explainability.** Each proposal explains its purpose, the relevant constraints, and any compromises (for example, skipping intervals before a difficult mountain trip).
+7. **No punishment for rest.** Deliberate rest, travel, and skipped sessions should not be displayed as personal failures or automatically compensated for with excessive training later.
+8. **Safe, conservative adaptation.** Avoid abrupt changes in training volume/intensity and unnecessary clustering of demanding sessions. The app is a planning aid, not medical advice.
+9. **Local-first and extensible.** A Python backend and React/TypeScript interface with local storage initially; integrations and more advanced algorithms can be added without replacing core domain logic.
+
+## 3. Supported activities and goals
+
+**Initial activity categories:** gym, easy running, quality/interval running, longer endurance running, hiking, cycling, recovery/rest, and non-training commitments (such as work, travel, appointments, and holidays). Activity types should be extensible.
+
+**Configurable goals:**
+- Maintain or develop general strength and muscle, initially at the session level rather than exercise/set level.
+- Improve running consistency, aerobic endurance, and VO2 max.
+- Build hiking and cycling endurance, especially sustained climbing and cumulative elevation gain.
+- Balance these goals with recovery and changing availability.
+
+The user can update the **relative priorities** of goals at any time. A baseline preference might be *approximately three gym sessions and two runs each week, plus weekend outdoors*, but these are **soft targets**, not minimums or hard constraints. The planner may explain when availability prevents satisfying targets.
+
+Gym scheduling should support a **rotating order of familiar workout types**, not a fixed mandatory weekday split: chest + shoulders/biceps, back + triceps/shoulders, and legs + biceps/triceps. Before a demanding hiking/cycling weekend, the planner should generally recommend scheduling strenuous legs earlier in the week or reducing leg load. Detailed gym exercise prescriptions are **out of scope for the initial MVP**.
+
+## 4. Calendar, time blocks, and availability
+
+### 4.1 Primary calendar model
+
+The main GUI is an **interactive weekly calendar**; a monthly overview is a secondary, optional view. The calendar displays both training sessions and non-training commitments.
+
+Each day has three planning sections:
+
+| Section | Purpose |
+| --- | --- |
+| **Morning** | Before-work exercise, morning commitments, etc. |
+| **Afternoon** | Work, travel, appointments, outings, etc. |
+| **Evening** | After-work gym, exercise, social commitments, etc. |
+
+These are **logical time blocks**, not strict clock-time limits. The user may optionally specify exact start/end times. The app should eventually allow configurable section boundaries, but this is not required for the first implementation.
+
+A calendar item has a start section and an end section (inclusive), so it may occupy **one, two, or three sections on a day**. For instance, a long hike can occupy morning + afternoon, or all three sections; a gym visit can occupy evening. Support for truly **multi-day events** (such as a trekking weekend) is desirable as a follow-on capability. Exact times, if provided, refine placement without making timed scheduling mandatory.
+
+### 4.2 Availability
+
+- Mark any entire day or any combination of morning/afternoon/evening as unavailable; this is allowed for any number of days.
+- Record non-training commitments and, where appropriate, mark the occupied blocks as unavailable for training suggestions.
+- Leave a block empty without promising to train in it. **Free does not mean required to fill.**
+- Support explicit preferences such as *prefer gym Tuesday/Wednesday/Friday evenings around 18:30* or *Monday/Thursday may be unavailable*, without converting them to requirements.
+- Never place a proposed workout in an unavailable block or in conflict with another accepted booking; an overlapping option would need explicit user action to resolve.
+- Let users view, add, edit, move, resize across sections, and remove calendar items interactively (for example by drag-and-drop), with accessible form-based editing as an alternative.
+- Permit a deliberate zero-workout day, rest week, or holiday period.
+
+### 4.3 Session state and ownership
+
+The **target** data model distinguishes: proposed/unaccepted, accepted/planned, completed, skipped/cancelled, and non-training commitments. An accepted item is protected from automatic replanning, whether or not it is explicitly marked as locked. Explicitly locked items are never recommended for movement unless the user unlocks them. Completed history remains intact unless the user deliberately corrects it.
+
+These richer states and lock semantics are *planned*; the current prototype only has planned/completed/skipped workout statuses.
+
+## 5. Training and activity logging
+
+A primary workflow is **one-click or quick completion** of an existing workout; the user may optionally expand it to enter more information or edit a past entry.
+
+**All per-activity fields are optional wherever technically possible:**
+- Date, activity and completion status (basic record identity).
+- Duration, distance, pace/speed, elevation gain, route or notes.
+- Heart-rate information, including average/max HR or time in zones if available.
+- Perceived exertion (RPE) and subjective fatigue.
+- Relevant fitness estimates, including watch-estimated VO2 max, as separate time-stamped observations.
+
+The UI should avoid requiring detailed metrics just to record that an activity happened. For some activities, only a date and category will be known. Store unknown values as missing/null; never infer that unentered workouts did not occur.
+
+Initially gym logging can track gym session type, duration, effort, status and notes. Exercises, sets, weights, and gym performance trends are future enhancements.
+
+## 6. Optional fitness and recovery information
+
+### 6.1 Fitness metrics
+
+Optional user-entered inputs may include current watch-estimated VO2 max, resting heart rate, recent running performance, endurance duration, climbing/elevation statistics, and historical activity summaries. Record observation dates and, where useful, a source (manual entry vs future imported measurement). Trends are more informative than a single noisy watch estimate.
+
+### 6.2 Readiness
+
+Optional check-ins may include energy, sleep quality, fatigue, muscle soreness, and notes. **No daily check-in is required.** If none exists, the planner falls back to the known schedule and conservative workload rules rather than interpreting absent readiness scores as low readiness.
+
+### 6.3 Levels of available information
+
+The same planner should operate gracefully with:
+1. **Minimal information:** general goals/defaults and currently free/unblocked calendar blocks; generate a cautious starting suggestion.
+2. **Preferences/availability:** honor stated priorities, target frequencies, preferred windows, commitments, and blocked sections.
+3. **History:** additionally consider completed volume, recent intensity, training frequency and hiking/cycling load.
+4. **Performance and readiness:** further tailor recommendations using the optional observed statistics and personal feedback.
+
+The planner must be clear about what information actually influenced a suggestion, and should avoid false precision when data is sparse.
+
+## 7. Recommendation and planning engine
+
+### 7.1 Planning behavior
+
+- The user chooses a horizon, initially **1–4 weeks**, and presses **Generate suggestions / Replan**.
+- The system considers the remaining part of the current week and, if requested, later weeks.
+- Recommendations are shown as a **preview** with proposed calendar positions, workout types, approximate duration/intensity, and an explanation.
+- The user may accept/reject each suggestion or explicitly accept a batch. **Nothing is committed before approval.**
+- Existing accepted sessions stay where they are by default. If the app thinks a change would help, it may offer it as a clearly separate opt-in suggestion, but must not move the session on its own.
+- Proposals are generated only for usable free time blocks. When insufficient time is available, propose fewer activities, lower volume or no activities, without treating the week as invalid.
+- Later weeks are provisional recommendations, not firm commitments.
+
+### 7.2 Desired training logic
+
+Initial recommendations should be **deterministic, rules-based, and explainable**, with configurable priorities and soft targets. Example rules and objectives:
+
+- Aim for consistent easy running before adding demanding VO2 max sessions. A starting plan may suggest two weekly runs, growing toward an optional third based on consistency and recovery.
+- Use mostly easy endurance training; introduce quality running cautiously and generally avoid multiple hard endurance efforts close together.
+- Count hard hikes, steep climbs and challenging rides toward weekly endurance and fatigue considerations, rather than evaluating running in isolation.
+- Rotate gym muscle-group sessions around weekend plans; avoid a heavy leg session immediately before a demanding hike when practical.
+- Permit a short easy morning run and an evening upper-body gym session on the same day where feasible.
+- Avoid placing hard intervals too close to heavy leg sessions, long outings or signs of poor recovery.
+- Prefer feasible, consistent training to maximizing session count.
+- Use reported VO2 max, heart rate, elevation, RPE, and readiness **only when available and relevant**; never require them.
+- Gradually progress durations, volume and intensity; avoid aggressive make-up workouts following missed sessions.
+
+Rules should be adjustable and testable, and not encode medical/physiological certainty from limited measurements. In a later phase, an optimization or AI-assisted recommendation layer may augment—but not silently override—the transparent safety and user-approval constraints.
+
+### 7.3 Explainability and trade-offs
+
+Each proposed session should be able to answer:
+- Why this activity, and why on this day/block?
+- Which goal or soft target does it serve?
+- Which calendar restrictions, completed activities or fatigue considerations affected it?
+- Which data was missing, and what defaults were used?
+- What changed compared with the previous proposal, if this was a replan?
+
+Example: *“Wednesday morning: 30-minute easy run. Monday and Thursday are blocked; Wednesday evening is upper-body gym, so an easy morning run is a feasible second session. Saturday's long climb is the week's demanding endurance session, so no VO2 max intervals are proposed.”*
+
+## 8. Replanning and preservation rules
+
+Replanning is **manual only**. Editing an event or adding a completed workout must **not** silently rewrite the calendar. A discreet *plan may be outdated* indicator may invite the user to request new suggestions.
+
+Replanning invariants:
+1. Never alter completed records without direct user editing.
+2. Never change accepted/planned sessions without explicit permission.
+3. Never replace or schedule through blocked sections or fixed commitments.
+4. Never require a minimum number of workouts or an available day.
+5. Do not automatically compensate for missed sessions by overloading later days.
+6. Allow a user to decline every proposal and continue using the calendar normally.
+
+For optional replacement recommendations, clearly show the proposed change and require separate confirmation. Manual user edits always take precedence over recommendations.
+
+## 9. Illustrative user workflows
+
+### First use with no metrics
+
+The user opens a mostly empty calendar, optionally sets training preferences, marks busy sections, chooses a one-week horizon and presses **Generate suggestions**. The engine generates cautious proposals using defaults and available calendar space. VO2 max, heart rate, past workouts and readiness are **not** prerequisites.
+
+### Busy travel week
+
+Monday and Thursday are blocked, while Tuesday, Wednesday and Friday evenings have room for gym. The user asks for a new plan. The app might suggest a short easy Wednesday morning run, three gym sessions if feasible, and a weekend endurance session; it can instead recommend fewer workouts if the remaining blocks are unavailable. Accepted workouts remain untouched.
+
+### Long mountain day
+
+The user adds a Saturday hike spanning **morning + afternoon**, or the full day. The engine treats it as a long outdoor endurance commitment, recommends lighter leg loading before it, and does not automatically pile a hard running session on top of the weekend. The user can still reject or change every proposed session.
+
+### Partial workout data
+
+The user marks a run complete with only its duration, later adding distance and average HR. The app can already use the completed session and duration; it only uses the extra metrics after they become available.
+
+### Change of priorities
+
+The user raises running/VO2 max priority for a month and reduces gym priority. On the next manually requested plan, the app recommends a different balance while preserving previously accepted calendar items.
+
+### Full week unavailable
+
+The user blocks every calendar section. The planner returns **no workout suggestions**, explains that no time is available, and does not treat this as an error.
+
+## 10. Initial MVP, later phases, and current implementation
+
+**Important:** *MVP* denotes the **target first fully useful version**, not the features already present in this repository.
+
+### Target MVP
+
+- Interactive weekly calendar organized by morning/afternoon/evening, with spanning items.
+- Manual training and non-training commitments, plus fully flexible block/day availability.
+- Accepted/proposed/completed session states and preservation of accepted sessions.
+- Quick completion and optional workout metrics (including running/cycling/hiking basics).
+- Editable goals, priorities, flexible targets and preferred training windows.
+- Manual 1–4-week suggestion generation, preview, per-item approval and understandable reasoning.
+- Conservative scheduling rules using optional training history and optional basic recovery feedback.
+- Local storage and basic automated tests for scheduling invariants.
+
+### Later enhancements
+
+- Monthly overview, customizable daypart boundaries and multi-day events.
+- More detailed running progression, performance charts and fitness trends.
+- Import/synchronization with sports watches and activity apps (subject to available APIs), and import/export of files.
+- Detailed gym exercises, weights and progression.
+- Richer recovery modeling, advanced optimization and optional AI-assisted recommendations.
+- Additional user experience improvements such as mobile-friendly layouts and advanced calendar manipulation.
+
+### Current implementation
+
+The starter currently provides:
+
+- A local **React/TypeScript** interface with a week selector, session form and weekly table.
+- A **FastAPI** backend with validated session and planning endpoints.
+- SQLite storage using the existing sessions schema, with **planned, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
+- An **ephemeral, whole-day** unavailability selector when generating suggestions (not persisted).
+- Explicit **Generate suggestions** and **Accept this batch** actions. Generating a preview does not save proposed sessions; acceptance rechecks the calendar and commits the entire batch in one transaction.
+- The existing basic **single-week, day-level rules** for gym, easy run and weekend activity.
+- Unit tests for the planner/storage and integration tests for API validation, proposal preservation and transactional acceptance.
+
+**Not yet implemented:** the daypart calendar, interactive drag-and-drop, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, item-by-item approval controls in the UI, multi-week proposals, editing/completing existing entries, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses fixed weekdays, can suggest elapsed dates in the selected week, and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
+
+## 11. Technical architecture
+
+The project uses Python 3.11+, **FastAPI** for HTTP endpoints, **React 19 + TypeScript + Vite** for the browser interface, **SQLite** for local storage, and **pytest** for backend tests. Streamlit has been removed.
+
+```text
+src/training_planner/
+  domain/models.py        # Framework-independent workout types and statuses
+  planner/rules.py        # Pure, deterministic single-week rules
+  application/services.py # Session creation, previews and transactional acceptance
+  storage/db.py           # SQLite connection and session repository
+  api/app.py              # FastAPI app factory and /api endpoints
+  api/schemas.py          # Validated HTTP request/response contracts
+frontend/
+  src/api/                # Typed HTTP client and transport types
+  src/components/         # Reusable UI components
+  src/App.tsx             # Weekly session and proposal workflows
+  vite.config.ts          # Local API proxy for development and build preview
+  package.json            # Frontend dependencies and commands
+  package-lock.json       # Reproducible frontend dependency resolution
+tests/
+  unit/                   # Planner and storage checks
+  integration/            # API and application workflow checks
+data/                     # Existing local database (excluded from version control)
+pyproject.toml            # Python dependencies, src packaging and tooling
+README.md                 # Product specification and setup
+```
+
+The interface calls application services through the API. Services coordinate the domain, planner and repository; the domain and planner do not import FastAPI, React or SQLite. HTTP validation lives at the API boundary. Database connections are short-lived, and services own write transactions.
+
+The existing database schema and `data/training.db` location are preserved. No database migration is needed for this reorganization. `TRAINING_PLANNER_DB` can override the location; use an absolute path when launching outside the project root. Versioned migrations remain a follow-on task before expanding the schema.
+
+Likely future domain concepts include `CalendarItem`, `TimeBlock`, `Availability`, `GoalPriority`, `TrainingPreference`, `WorkoutMetrics`, `ReadinessEntry`, and `PlanningProposal`, with stable identifiers, optional metrics and explicit ownership/status distinctions. Those types are **proposals**, not current modules or database tables.
+
+For a future planner, distinguish **hard constraints** (unavailable blocks, accepted commitments, explicit locks) from **soft preferences** (preferred times, frequency targets, gym split order, ideal progression). Tests should cover fully blocked weeks, spanning events, absent metrics, accepted-session preservation, and rejection of all proposals.
+
+## 12. Installation and development
+
+Prerequisites: Python 3.11+ and Node.js 22.12+ with npm. Run the following from the project root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m pip install -e '.[dev]'
+python -m uvicorn training_planner.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start from the **project root** and run:
+
+```bash
+# Make this checkout's local Node/npm installation available in this terminal.
+export PATH="$PWD/.tools/node/bin:$PATH"
+cd frontend
+npm ci
+npm run dev
+```
+
+The local Node distribution in `.tools/node` is available in this checkout but is excluded from version control. On a fresh checkout, install Node.js 22.12+ with npm first; the PATH line above is unnecessary if your normal Node installation is already available. Activating the Python virtual environment does not add Node/npm to PATH. PATH changes apply only to the terminal where the export command runs, so repeat it in each new frontend terminal.
+
+If you are already inside `frontend/` and see `npm: command not found`, run:
+
+```bash
+export PATH="$PWD/../.tools/node/bin:$PATH"
+node --version
+npm --version
+npm ci
+npm run dev
+```
+
+Open **http://127.0.0.1:5173**. Vite forwards `/api` requests to the local backend on port 8000, so no cross-origin configuration is required. The API documentation is available at **http://127.0.0.1:8000/docs**. Both processes run locally; the interface uses no remote fonts or services at runtime.
+
+Backend checks, from the project root with the virtual environment activated:
+
+```bash
+python -m pytest -q
+ruff check src tests
+ruff format --check src tests
+```
+
+Frontend checks and build, from `frontend/`:
+
+```bash
+npm run typecheck
+npm run build
+npm run preview
+```
+
+The preview runs on port 4173 and also requires the backend on port 8000. It is a local build preview, not a production deployment configuration. After updating frontend dependencies with `npm install`, commit the updated `package-lock.json`.
+
+The SQLite database is created locally at `data/training.db` on the first session/planning operation. Importing the API or checking `/api/health` does not create a database. The application is currently a single-user local prototype. Backup/sync, migrations, data import and multi-user support are not yet provided.
+
+## 13. Open implementation questions
+
+These can be settled during development without blocking the product vision:
+
+1. Exact default time boundaries for morning, afternoon and evening, and whether overlapping items within a block are supported when exact times do not conflict.
+2. The interaction design and React components for the logical daypart grid, spanning items and accessible drag/drop alternatives.
+3. How to represent workouts spanning days, and how time-zone changes during travel should be handled.
+4. The specific default target frequencies and progression caps for different experience levels.
+5. How to weight endurance load, gym fatigue, subjective readiness and incomplete measurements in explainable rules.
+6. The data migration and export strategy as the initial SQLite schema evolves.
+
+Changes to this README should preserve the distinction between **intended requirements**, **MVP scope**, and **already implemented behavior**.
