@@ -9,6 +9,16 @@ from training_planner.api.app import create_app
 from training_planner.application.services import accept_proposals, generate_proposals, get_sessions
 
 
+@pytest.fixture(autouse=True)
+def planning_clock(monkeypatch):
+    """Freeze the service clock so fixed calendar dates remain deterministic."""
+    from training_planner.application import services
+
+    clock = {"today": date(2026, 10, 5)}
+    monkeypatch.setattr(services, "_planning_date", lambda: clock["today"])
+    return clock
+
+
 @pytest.fixture
 def client(tmp_path):
     """Use a separate database for each API test."""
@@ -170,3 +180,66 @@ def test_api_construction_and_health_do_not_create_database(tmp_path):
     with TestClient(create_app(path)) as client:
         assert client.get("/api/health").json() == {"status": "ok"}
     assert not path.exists()
+
+
+def test_acceptance_saves_only_selected_proposals(client):
+    """Accepting a subset leaves every unchecked suggestion unsaved."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    selected = [{key: value for key, value in item.items() if key != "id"} for item in preview[::2]]
+
+    response = client.post("/api/proposals/accept", json={**request, "proposals": selected})
+
+    assert response.status_code == 201
+    saved = response.json()
+    assert [item["day"] for item in saved] == [item["day"] for item in selected]
+    assert (
+        client.get("/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}).json()
+        == saved
+    )
+
+
+@pytest.mark.parametrize("include_elapsed", [True, False])
+def test_acceptance_rechecks_date_after_midnight(client, planning_clock, include_elapsed):
+    """Reject elapsed selections atomically while allowing still-eligible items."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    planning_clock["today"] = date(2026, 10, 6)
+    selected = [
+        {key: value for key, value in item.items() if key != "id"}
+        for item in preview
+        if include_elapsed or item["day"] >= "2026-10-06"
+    ]
+
+    response = client.post("/api/proposals/accept", json={**request, "proposals": selected})
+
+    assert response.status_code == (409 if include_elapsed else 201)
+    saved = client.get("/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}).json()
+    if include_elapsed:
+        assert saved == []
+    else:
+        assert saved == response.json()
+        assert [item["day"] for item in saved] == [item["day"] for item in selected]
+
+
+def test_generation_excludes_elapsed_dates(client, planning_clock):
+    """The API applies the inclusive service clock cutoff to previews."""
+    planning_clock["today"] = date(2026, 10, 7)
+    response = client.post("/api/proposals", json={"week_start": "2026-10-05"})
+
+    assert response.status_code == 200
+    assert [item["day"] for item in response.json()] == [
+        "2026-10-07",
+        "2026-10-09",
+        "2026-10-10",
+        "2026-10-11",
+    ]
+
+
+def test_generation_returns_empty_preview_for_elapsed_week(client, planning_clock):
+    """A wholly elapsed week produces no suggestions rather than an error."""
+    planning_clock["today"] = date(2026, 10, 12)
+    response = client.post("/api/proposals", json={"week_start": "2026-10-05"})
+
+    assert response.status_code == 200
+    assert response.json() == []

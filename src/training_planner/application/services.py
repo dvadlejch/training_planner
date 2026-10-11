@@ -13,6 +13,17 @@ class ProposalConflict(ValueError):
     """Indicate that selected proposals no longer match the available calendar."""
 
 
+def _planning_date() -> date:
+    """Return the backend host's local calendar date.
+
+    Returns
+    -------
+    date
+        Inclusive date cutoff for generating or accepting suggestions.
+    """
+    return date.today()
+
+
 def get_sessions(path: Path, start: date, end: date) -> list[Session]:
     """Read the saved calendar for an inclusive date range.
 
@@ -82,6 +93,8 @@ def create_session(path: Path, session: Session) -> Session:
 def generate_proposals(path: Path, week_start: date, blocked: set[date]) -> list[Session]:
     """Generate a preview without saving any proposed workouts.
 
+    Dates before the backend host's current local date are excluded.
+
     Parameters
     ----------
     path : Path
@@ -106,13 +119,15 @@ def generate_proposals(path: Path, week_start: date, blocked: set[date]) -> list
         If the database operation fails.
     """
     existing = get_sessions(path, week_start, week_start + timedelta(days=6))
-    return suggest_week(week_start, existing, blocked)
+    return suggest_week(week_start, existing, blocked, not_before=_planning_date())
 
 
 def accept_proposals(
     path: Path, week_start: date, blocked: set[date], proposals: list[Session]
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
+
+    The current local date is checked again so previews can expire overnight.
 
     Parameters
     ----------
@@ -133,7 +148,7 @@ def accept_proposals(
     Raises
     ------
     ProposalConflict
-        If selected suggestions are duplicated, altered, or no longer available.
+        If selected suggestions are duplicated, altered, elapsed, or no longer available.
     ValueError
         If week_start is not a Monday or stored session values are invalid.
     OSError
@@ -146,7 +161,10 @@ def accept_proposals(
         # cannot book a proposed date between validation and insertion.
         conn.execute("BEGIN IMMEDIATE")
         existing = list_sessions(conn, week_start, week_start + timedelta(days=6))
-        available = suggest_week(week_start, existing, blocked)
+        not_before = _planning_date()
+        if any(session.day < not_before for session in proposals):
+            raise ProposalConflict("Some selected dates have elapsed; generate suggestions again")
+        available = suggest_week(week_start, existing, blocked, not_before=not_before)
         if len({session.day for session in proposals}) != len(proposals):
             raise ProposalConflict("Duplicate proposed dates; generate suggestions again")
         if any(session not in available for session in proposals):

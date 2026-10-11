@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
 import { acceptProposals, generateProposals, listSessions, saveSession } from "./api/client";
 import { activities, statuses, type PlanningRequest, type Session, type SessionInput } from "./api/types";
-import SessionTable from "./components/SessionTable";
+import WeeklyCalendar from "./components/WeeklyCalendar";
 
 function localDate(date: Date): string {
   // Calendar dates are local dates: converting to UTC could change the day.
@@ -38,13 +38,18 @@ export default function App(): ReactElement {
   const [week, setWeek] = useState(initialMonday);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [preview, setPreview] = useState<{ input: PlanningRequest; sessions: Session[] } | null>(null);
+  const [preview, setPreview] = useState<{
+    input: PlanningRequest;
+    sessions: Session[];
+    selectedDays: string[];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const validWeek = Boolean(week) && new Date(`${week}T12:00:00`).getDay() === 1;
+  const selectedCount = preview?.selectedDays.length ?? 0;
 
   useEffect(() => {
     if (!validWeek) { setLoading(false); return; }
@@ -92,16 +97,22 @@ export default function App(): ReactElement {
     await run(async () => {
       setPreview(null);
       const proposed = await generateProposals(input);
-      setPreview({ input, sessions: proposed });
+      // Start unchecked so acceptance reflects an explicit user selection.
+      setPreview({ input, sessions: proposed, selectedDays: [] });
     });
   }
 
   async function accept(): Promise<void> {
     if (!preview) return;
+    const selected = preview.sessions.filter((session) =>
+      preview.selectedDays.includes(session.day));
+    if (selected.length === 0) return;
+
     await run(async () => {
-      await acceptProposals(preview.input, preview.sessions);
-      setPreview(null); setRevision((value) => value + 1);
-      setNotice("Suggestions accepted.");
+      await acceptProposals(preview.input, selected);
+      setPreview(null);
+      setRevision((value) => value + 1);
+      setNotice(`${selected.length} suggestion(s) accepted.`);
     });
   }
 
@@ -118,8 +129,30 @@ export default function App(): ReactElement {
             setWeek(event.target.value); setBlocked([]); setPreview(null); setError(""); setNotice("");
           }} /></label>
         {!validWeek && <p role="alert">Select a Monday to view a week.</p>}
-        {validWeek && (loading ? <p role="status">Loading sessions…</p> : <SessionTable sessions={sessions} />)}
-      </section>
+        {validWeek && (
+          loading ? (
+            <p role="status">Loading sessions…</p>
+          ) : (
+            <WeeklyCalendar
+              weekStart={week}
+              sessions={sessions}
+              proposals={preview?.sessions ?? []}
+              blocked={blocked}
+              selection={preview ? {
+                selectedDays: preview.selectedDays,
+                disabled: busy,
+                onChange: (day, selected) => {
+                  setPreview((current) => current ? {
+                    ...current,
+                    selectedDays: selected
+                      ? [...new Set([...current.selectedDays, day])]
+                      : current.selectedDays.filter((value) => value !== day),
+                  } : null);
+                },
+              } : undefined}
+            />
+          )
+        )}      </section>
       <section aria-labelledby="log-heading">
         <h2 id="log-heading">Log or schedule a session</h2>
         <form onSubmit={submitSession}><fieldset disabled={busy} className="form-grid">
@@ -148,13 +181,48 @@ export default function App(): ReactElement {
           })}</div>
         </fieldset>
         <button disabled={busy || !validWeek || loading} onClick={generate}>Generate suggestions</button>
-        {preview && <div className="preview"><h3>Review your proposal</h3>
-          {preview.sessions.length === 0 ? <p>No available gaps under the current rules.</p> : <>
-            <SessionTable sessions={preview.sessions} />
-            <button disabled={busy} onClick={accept}>Accept this batch</button>
-          </>}
-          <button className="secondary" disabled={busy} onClick={() => setPreview(null)}>Dismiss preview</button>
-        </div>}
+        {preview && (
+          <div className="preview">
+            <h3>Review your proposal</h3>
+
+            {preview.sessions.length === 0 ? (
+              <p>No eligible dates under the current rules and availability.</p>
+            ) : (
+              <>
+                <p>
+                  Select suggestions in the calendar above, then accept them.
+                  Unchecked suggestions remain unsaved.
+                </p>
+
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => setPreview((current) => current ? {
+                    ...current,
+                    selectedDays: current.sessions.map((session) => session.day),
+                  } : null)}
+                >
+                  Select all
+                </button>
+
+                <button disabled={busy || selectedCount === 0} onClick={accept}>
+                  Accept selected ({selectedCount})
+                </button>
+              </>
+            )}
+
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => {
+                setPreview(null);
+                setNotice("Preview dismissed. No suggestions were saved.");
+              }}
+            >
+              Dismiss all
+            </button>
+          </div>
+        )}
       </section>
     </main>
   );

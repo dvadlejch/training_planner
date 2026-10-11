@@ -6,7 +6,11 @@ from training_planner.domain.models import Activity, Session
 
 
 def suggest_week(
-    week_start: date, existing: list[Session], blocked: set[date] | None = None
+    week_start: date,
+    existing: list[Session],
+    blocked: set[date] | None = None,
+    *,
+    not_before: date,
 ) -> list[Session]:
     """Suggest unoccupied days in one Monday-to-Sunday week.
 
@@ -21,6 +25,9 @@ def suggest_week(
         Saved workouts whose dates must remain occupied.
     blocked : set[date] or None
         Additional dates unavailable for suggestions.
+    not_before : date
+        Earliest eligible date, inclusive. Supplied explicitly to keep rules deterministic.
+
 
     Returns
     -------
@@ -40,7 +47,7 @@ def suggest_week(
 
     def add(offset: int, activity: Activity, minutes: int | None = None) -> None:
         day = week_start + timedelta(days=offset)
-        if day not in occupied:
+        if day >= not_before and day not in occupied:
             proposals.append(
                 Session(
                     day=day,
