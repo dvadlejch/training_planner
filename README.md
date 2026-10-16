@@ -259,7 +259,16 @@ For a future planner, distinguish **hard constraints** (unavailable blocks, acce
 
 ## 12. Installation and development
 
-Prerequisites: Python 3.11+ and Node.js 22.12+ with npm. Run the following from the project root:
+Prerequisites: Python 3.11+ and Node.js 22.12+ with npm. For the Makefile workflow, also install GNU Make and uv and ensure all tools are on PATH. Run from the project root:
+
+```bash
+make install  # Install both backend and frontend dependencies
+make run      # Start API on port 8000 and frontend on port 5173
+```
+
+Use `make dev` instead of `make install` to include Python test and lint tools. You can also run `make run-api` and `make run-frontend` in separate terminals. No virtual environment activation is needed for these targets. The Makefile supports Windows and Unix and automatically includes the optional `.tools/node` installation on PATH. On Windows, that installation can contain `node.exe` directly; on Unix it uses `.tools/node/bin`.
+
+To install and run manually without Make or uv:
 
 ```bash
 python -m venv .venv
@@ -278,7 +287,7 @@ npm ci
 npm run dev
 ```
 
-The local Node distribution in `.tools/node` is available in this checkout but is excluded from version control. On a fresh checkout, install Node.js 22.12+ with npm first; the PATH line above is unnecessary if your normal Node installation is already available. Activating the Python virtual environment does not add Node/npm to PATH. PATH changes apply only to the terminal where the export command runs, so repeat it in each new frontend terminal.
+The optional local Node distribution in `.tools/node` is excluded from version control. On a fresh checkout, install Node.js 22.12+ with npm first; the PATH line above is unnecessary if your normal Node installation is already available. The `export` examples use a Unix shell; on Windows with Node/npm on PATH, run `cd frontend`, `npm ci`, and `npm run dev`. Activating the Python virtual environment does not add Node/npm to PATH. PATH changes apply only to the terminal where the export command runs, so repeat it in each new frontend terminal.
 
 If you are already inside `frontend/` and see `npm: command not found`, run:
 
