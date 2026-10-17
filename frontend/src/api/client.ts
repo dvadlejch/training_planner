@@ -10,6 +10,8 @@ import type { PlanningRequest, Session, SessionInput } from "./types";
  *     JSON payload; omission selects GET rather than POST.
  * signal : AbortSignal, optional
  *     Cancellation signal for a superseded calendar query.
+ * method : string, optional
+ *     Explicit HTTP method; otherwise inferred from the body.
  *
  * Returns
  * -------
@@ -21,9 +23,9 @@ import type { PlanningRequest, Session, SessionInput } from "./types";
  * Error
  *     If the server rejects the request, networking fails, or JSON is invalid.
  */
-async function request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+async function request<T>(path: string, body?: unknown, signal?: AbortSignal, method?: string): Promise<T> {
   const response = await fetch(`/api${path}`, {
-    method: body === undefined ? "GET" : "POST",
+    method: method ?? (body === undefined ? "GET" : "POST"),
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
@@ -33,6 +35,8 @@ async function request<T>(path: string, body?: unknown, signal?: AbortSignal): P
     throw new Error(typeof error.detail === "string"
       ? error.detail : `Request failed (${response.status}). Check the supplied values.`);
   }
+  // Successful deletion has no JSON body.
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -81,6 +85,11 @@ export function listSessions(start: string, end: string, signal?: AbortSignal): 
  */
 export function saveSession(session: SessionInput): Promise<Session> {
   return request("/sessions", session);
+}
+
+/** Permanently delete a saved workout; reject on server or network failure. */
+export function deleteSession(id: number): Promise<void> {
+  return request(`/sessions/${id}`, undefined, undefined, "DELETE");
 }
 
 /** Generate a preview without storing the proposed workouts.

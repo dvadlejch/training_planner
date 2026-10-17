@@ -212,7 +212,8 @@ The user blocks every calendar section. The planner returns **no workout suggest
 
 The starter currently provides:
 
-- A local **React/TypeScript** interface with a week selector, session form and weekly table.
+- A local **React/TypeScript** interface with a week selector, session form and weekly calendar.
+- A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
 - A **FastAPI** backend with validated session and planning endpoints.
 - SQLite storage using the current sessions schema, with **planned, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
 - An **ephemeral, whole-day** unavailability selector when generating suggestions (not persisted).

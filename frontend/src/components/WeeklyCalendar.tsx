@@ -16,6 +16,8 @@ interface WeeklyCalendarProps {
     proposals?: readonly Session[];
     blocked?: readonly string[];
     selection?: CalendarSelection;
+    onDelete?: (session: Session) => void;
+    disabled?: boolean;
 }
 
 /**
@@ -45,6 +47,8 @@ export default function WeeklyCalendar({
     proposals = [],
     blocked = [],
     selection,
+    onDelete,
+    disabled = false,
 }: WeeklyCalendarProps): ReactElement {
     const today = new Date();
     const weekdayFormat = new Intl.DateTimeFormat(undefined, {
@@ -140,6 +144,22 @@ export default function WeeklyCalendar({
                                 )}
                                 {session.notes && (
                                     <p className="calendar-card-notes">{session.notes}</p>
+                                )}
+
+                                {!isProposal && session.id !== null && onDelete && (
+                                    <button
+                                        type="button"
+                                        className="calendar-delete"
+                                        aria-label={`Delete ${day} ${activityLabel(session.activity)}`}
+                                        disabled={disabled}
+                                        onClick={() => {
+                                            if (window.confirm(
+                                                `Delete saved ${activityLabel(session.activity)} on ${day} (${session.status})? This cannot be undone.`,
+                                            )) onDelete(session);
+                                        }}
+                                    >
+                                        Delete
+                                    </button>
                                 )}
 
                                 {isProposal && selection && (

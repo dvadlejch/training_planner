@@ -4,7 +4,7 @@ import os
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from training_planner.api.schemas import (
@@ -19,6 +19,7 @@ from training_planner.application.services import (
     create_session,
     generate_proposals,
     get_sessions,
+    remove_session,
 )
 from training_planner.domain.models import Session
 from training_planner.storage.db import DEFAULT_DB
@@ -128,6 +129,15 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             If the database operation fails.
         """
         return create_session(path, Session(**payload.model_dump()))
+
+    @application.delete("/api/sessions/{session_id}", status_code=204)
+    def delete_saved_session(session_id: int) -> Response:
+        """Delete a saved workout, returning 404 if the identifier does not exist."""
+        try:
+            remove_session(path, session_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @application.post("/api/proposals", response_model=list[SessionResponse])
     def propose(payload: PlanningRequest) -> list[Session]:

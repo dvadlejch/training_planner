@@ -283,6 +283,15 @@ th {
     margin-top: 8px;
 }
 
+.calendar-card .calendar-delete {
+    padding: 6px 8px;
+    margin-right: 0;
+    background: white;
+    color: #8a3421;
+    border-color: #8a3421;
+    font-size: .8rem;
+}
+
 .calendar-selection {
     flex-direction: row;
     align-items: center;

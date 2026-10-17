@@ -536,3 +536,48 @@ def test_acceptance_order_preserves_remaining_suggestions(
     )
     assert saved.status_code == 200
     assert [{**s, "id": None} for s in saved.json()] == preview
+
+
+@pytest.mark.parametrize("status", ["planned", "completed", "skipped"])
+def test_delete_session_persists_and_preserves_other_entries(client, status):
+    """Delete only the selected saved activity, regardless of its workout status."""
+    saved = client.post(
+        "/api/sessions",
+        json={"day": "2026-10-06", "activity": "gym", "status": status},
+    ).json()
+    other = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "cycle"}
+    ).json()
+
+    response = client.delete(f"/api/sessions/{saved['id']}")
+    assert response.status_code == 204
+    assert response.content == b""
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [other]
+    assert client.delete(f"/api/sessions/{saved['id']}").status_code == 404
+
+
+def test_delete_missing_session_preserves_calendar(client):
+    """Missing identifiers return a useful 404 without removing existing activities."""
+    saved = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "gym"}
+    ).json()
+    response = client.delete("/api/sessions/9999")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Session 9999 does not exist"}
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [saved]
+
+
+def test_accepted_suggestion_can_be_deleted_and_proposed_again(client):
+    """Deleting an accepted suggestion frees its date for a fresh planning preview."""
+    request = {"week_start": "2026-10-05"}
+    proposal = client.post("/api/proposals", json=request).json()[0]
+    proposal.pop("id")
+    saved = client.post(
+        "/api/proposals/accept", json={**request, "proposals": [proposal]}
+    ).json()[0]
+    assert client.delete(f"/api/sessions/{saved['id']}").status_code == 204
+    assert {**proposal, "id": None} in client.post("/api/proposals", json=request).json()

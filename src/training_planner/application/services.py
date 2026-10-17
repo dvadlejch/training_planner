@@ -7,7 +7,12 @@ from pathlib import Path
 from training_planner.domain.models import Session
 from training_planner.domain.running import validate_zone_target
 from training_planner.planner.rules import suggest_week
-from training_planner.storage.db import connect, list_sessions, save_session
+from training_planner.storage.db import (
+    connect,
+    delete_session,
+    list_sessions,
+    save_session,
+)
 
 
 class ProposalConflict(ValueError):
@@ -90,6 +95,13 @@ def create_session(path: Path, session: Session) -> Session:
         raise ValueError("effort must be between 1 and 10")
     with closing(connect(path)) as conn, conn:
         return save_session(conn, session)
+
+
+def remove_session(path: Path, session_id: int) -> None:
+    """Commit deletion of a saved workout, raising LookupError if it is missing."""
+    with closing(connect(path)) as conn, conn:
+        if not delete_session(conn, session_id):
+            raise LookupError(f"Session {session_id} does not exist")
 
 
 def generate_proposals(

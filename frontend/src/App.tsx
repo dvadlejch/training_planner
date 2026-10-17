@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { acceptProposals, generateProposals, listSessions, saveSession } from "./api/client";
+import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession } from "./api/client";
 import { activities, statuses, type PlanningRequest, type Session, type SessionInput } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
@@ -100,6 +100,18 @@ export default function App(): ReactElement {
     });
   }
 
+  async function removeSession(session: Session): Promise<void> {
+    if (busy || session.id === null) return;
+    const id = session.id;
+    await run(async () => {
+      await deleteSession(id);
+      setSessions((current) => current.filter((item) => item.id !== id));
+      setPreview(null);
+      setRevision((value) => value + 1);
+      setNotice("Session deleted. Generate suggestions when you are ready.");
+    });
+  }
+
   async function generate(): Promise<void> {
     const input = { week_start: week, weeks, blocked: [...blocked] };
     await run(async () => {
@@ -154,6 +166,8 @@ export default function App(): ReactElement {
               key={index}
               weekStart={addDays(week, index * 7)}
               sessions={sessions}
+              onDelete={removeSession}
+              disabled={busy}
               proposals={preview?.sessions ?? []}
               blocked={blocked}
               selection={preview ? {

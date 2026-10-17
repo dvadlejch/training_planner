@@ -104,6 +104,15 @@ def save_session(conn: sqlite3.Connection, session: Session) -> Session:
     return replace(session)
 
 
+def delete_session(conn: sqlite3.Connection, session_id: int) -> bool:
+    """Delete one saved session without committing the caller's transaction.
+
+    Return whether the identifier existed. Other sessions are left untouched.
+    """
+    cursor = conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+    return cursor.rowcount == 1
+
+
 def list_sessions(conn: sqlite3.Connection, start: date, end: date) -> list[Session]:
     """Read sessions within an inclusive calendar-date range.
 
