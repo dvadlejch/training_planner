@@ -87,6 +87,16 @@ export function saveSession(session: SessionInput): Promise<Session> {
   return request("/sessions", session);
 }
 
+/** Replace a saved workout while retaining its database identifier. */
+export function updateSession(id: number, session: SessionInput): Promise<Session> {
+  return request(`/sessions/${id}`, session, undefined, "PUT");
+}
+
+/** Change only status so quick actions cannot overwrite other workout details. */
+export function updateSessionStatus(id: number, status: SessionInput["status"]): Promise<Session> {
+  return request(`/sessions/${id}/status`, { status }, undefined, "PATCH");
+}
+
 /** Permanently delete a saved workout; reject on server or network failure. */
 export function deleteSession(id: number): Promise<void> {
   return request(`/sessions/${id}`, undefined, undefined, "DELETE");

@@ -1,10 +1,11 @@
 """Application operations shared by HTTP routes and future interfaces."""
 
 from contextlib import closing
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
-from training_planner.domain.models import Session
+from training_planner.domain.models import Session, Status
 from training_planner.domain.running import validate_zone_target
 from training_planner.planner.rules import suggest_week
 from training_planner.storage.db import (
@@ -12,6 +13,7 @@ from training_planner.storage.db import (
     delete_session,
     list_sessions,
     save_session,
+    set_session_status,
 )
 
 
@@ -86,15 +88,39 @@ def create_session(path: Path, session: Session) -> Session:
     sqlite3.Error
         If the database operation fails.
     """
-    validate_zone_target(session.hr_zone_min, session.hr_zone_max)
+    _validate_session(session)
     if session.id is not None:
         raise ValueError("A new session must not have an id")
+    with closing(connect(path)) as conn, conn:
+        return save_session(conn, session)
+
+
+def _validate_session(session: Session) -> None:
+    """Validate optional workout metrics for both creation and editing."""
+    validate_zone_target(session.hr_zone_min, session.hr_zone_max)
     if session.duration_min is not None and not 0 <= session.duration_min <= 1440:
         raise ValueError("duration_min must be between 0 and 1440")
     if session.effort is not None and not 1 <= session.effort <= 10:
         raise ValueError("effort must be between 1 and 10")
+
+
+def update_session(path: Path, session_id: int, session: Session) -> Session:
+    """Replace a saved workout, preserving its identifier and all other records.
+
+    Raise LookupError for missing records and ValueError for invalid metrics or
+    a body-supplied identifier. The update is committed in one transaction.
+    """
+    _validate_session(session)
+    if session.id is not None:
+        raise ValueError("The session identifier must be supplied separately")
     with closing(connect(path)) as conn, conn:
-        return save_session(conn, session)
+        return save_session(conn, replace(session, id=session_id))
+
+
+def change_session_status(path: Path, session_id: int, status: Status) -> Session:
+    """Commit a status-only update, raising LookupError for a missing workout."""
+    with closing(connect(path)) as conn, conn:
+        return set_session_status(conn, session_id, status)
 
 
 def remove_session(path: Path, session_id: int) -> None:

@@ -12,14 +12,17 @@ from training_planner.api.schemas import (
     PlanningRequest,
     SessionInput,
     SessionResponse,
+    SessionStatusInput,
 )
 from training_planner.application.services import (
     ProposalConflict,
     accept_proposals,
+    change_session_status,
     create_session,
     generate_proposals,
     get_sessions,
     remove_session,
+    update_session,
 )
 from training_planner.domain.models import Session
 from training_planner.storage.db import DEFAULT_DB
@@ -129,6 +132,24 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             If the database operation fails.
         """
         return create_session(path, Session(**payload.model_dump()))
+
+    @application.put("/api/sessions/{session_id}", response_model=SessionResponse)
+    def edit_session(session_id: int, payload: SessionInput) -> Session:
+        """Replace a saved workout with validated input, or return 404 if missing."""
+        try:
+            return update_session(path, session_id, Session(**payload.model_dump()))
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.patch(
+        "/api/sessions/{session_id}/status", response_model=SessionResponse
+    )
+    def update_status(session_id: int, payload: SessionStatusInput) -> Session:
+        """Change a saved workout's status without overwriting its other details."""
+        try:
+            return change_session_status(path, session_id, payload.status)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @application.delete("/api/sessions/{session_id}", status_code=204)
     def delete_saved_session(session_id: int) -> Response:

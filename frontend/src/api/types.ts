@@ -3,7 +3,7 @@ export const activities = [
   "gym", "recovery_run", "easy_run", "long_run", "tempo_run", "interval_run",
   "hard_endurance_run", "race", "hike", "cycle", "rest",
 ] as const;
-export const statuses = ["planned", "completed", "skipped"] as const;
+export const statuses = ["planned", "confirmed", "completed", "skipped"] as const;
 
 export interface SessionInput {
   day: string;

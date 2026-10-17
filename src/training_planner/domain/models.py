@@ -25,6 +25,7 @@ class Status(str, Enum):
     """Represent a saved workout's planning or completion status."""
 
     PLANNED = "planned"
+    CONFIRMED = "confirmed"
     COMPLETED = "completed"
     SKIPPED = "skipped"
 
@@ -38,7 +39,7 @@ class Session:
     activity
         Workout category.
     status
-        Planned, completed, or skipped status.
+        Planned, confirmed (committed but upcoming), completed, or skipped status.
     duration_min
         Optional duration in minutes; None means unknown.
     effort

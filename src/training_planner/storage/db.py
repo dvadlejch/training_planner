@@ -141,17 +141,35 @@ def list_sessions(conn: sqlite3.Connection, start: date, end: date) -> list[Sess
         "SELECT * FROM sessions WHERE day BETWEEN ? AND ? ORDER BY day, id",
         (start.isoformat(), end.isoformat()),
     ).fetchall()
-    return [
-        Session(
-            id=row["id"],
-            day=date.fromisoformat(row["day"]),
-            activity=Activity(row["activity"]),
-            status=Status(row["status"]),
-            duration_min=row["duration_min"],
-            effort=row["effort"],
-            notes=row["notes"],
-            hr_zone_min=row["hr_zone_min"],
-            hr_zone_max=row["hr_zone_max"],
-        )
-        for row in rows
-    ]
+    return [_session_from_row(row) for row in rows]
+
+
+def _session_from_row(row: sqlite3.Row) -> Session:
+    """Decode one saved workout using the same contract for reads and updates."""
+    return Session(
+        id=row["id"],
+        day=date.fromisoformat(row["day"]),
+        activity=Activity(row["activity"]),
+        status=Status(row["status"]),
+        duration_min=row["duration_min"],
+        effort=row["effort"],
+        notes=row["notes"],
+        hr_zone_min=row["hr_zone_min"],
+        hr_zone_max=row["hr_zone_max"],
+    )
+
+
+def set_session_status(
+    conn: sqlite3.Connection, session_id: int, status: Status
+) -> Session:
+    """Update only status within the caller's transaction, or raise LookupError.
+
+    The write lock keeps the subsequent read consistent until the caller commits.
+    """
+    cursor = conn.execute(
+        "UPDATE sessions SET status=? WHERE id=?", (status.value, session_id)
+    )
+    if cursor.rowcount != 1:
+        raise LookupError(f"Session {session_id} does not exist")
+    row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+    return _session_from_row(row)

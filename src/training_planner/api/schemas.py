@@ -27,6 +27,13 @@ class SessionInput(BaseModel):
         return self
 
 
+class SessionStatusInput(BaseModel):
+    """Change only the saved workout status without replacing its other fields."""
+
+    model_config = ConfigDict(extra="forbid")
+    status: Status
+
+
 class SessionResponse(SessionInput):
     """Serialize sessions or previews with an optional database identifier."""
 

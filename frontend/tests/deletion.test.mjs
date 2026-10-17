@@ -1,29 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import ts from "typescript";
+import { sourceUrl } from "./loadSource.mjs";
 
-// Compile the real TSX component with the project's existing compiler so its
-// rendered controls and event handlers can be exercised without a DOM library.
-function moduleUrl(path, imports = {}) {
-  const source = readFileSync(new URL(path, import.meta.url), "utf8");
-  let { outputText } = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX },
-    fileName: path,
-  });
-  for (const [name, url] of Object.entries(imports)) {
-    outputText = outputText.replaceAll(JSON.stringify(name), JSON.stringify(url));
-  }
-  return `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`;
-}
-
-const { default: WeeklyCalendar } = await import(moduleUrl(
-  "../src/components/WeeklyCalendar.tsx", {
-    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-    "../running": moduleUrl("../src/running.ts"),
-  },
-));
-const { deleteSession } = await import(moduleUrl("../src/api/client.ts"));
+const { default: WeeklyCalendar } = await import(sourceUrl("../src/components/WeeklyCalendar.tsx"));
+const { deleteSession } = await import(sourceUrl("../src/api/client.ts"));
 const saved = {
   id: 7, day: "2026-10-06", activity: "gym", status: "planned",
   duration_min: null, effort: null, hr_zone_min: null, hr_zone_max: null, notes: "",
@@ -42,7 +22,7 @@ function buttons(node) {
 test("saved activity deletion requires confirmation and identifies the entry", (t) => {
   const originalWindow = globalThis.window;
   t.after(() => { globalThis.window = originalWindow; });
-  for (const status of ["planned", "completed", "skipped"]) {
+  for (const status of ["planned", "confirmed", "completed", "skipped"]) {
     const session = { ...saved, status };
     const deleted = [];
     let approved = false;

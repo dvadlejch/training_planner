@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent, type ReactElement } from "react";
-import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession } from "./api/client";
-import { activities, statuses, type PlanningRequest, type Session, type SessionInput } from "./api/types";
+import { useEffect, useState, type ReactElement } from "react";
+import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession, updateSession, updateSessionStatus } from "./api/client";
+import { type PlanningRequest, type Session, type SessionInput } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
-import { activityLabel, runPresets } from "./running";
+import SessionForm from "./components/SessionForm";
 
 function localDate(date: Date): string {
   // Calendar dates are local dates: converting to UTC could change the day.
@@ -29,7 +29,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The operation could not be completed.";
 }
 
-/** Render the weekly calendar list, session form, and manual proposal workflow.
+/** Render the editable weekly calendar and manual proposal workflow.
  *
  * Returns
  * -------
@@ -37,9 +37,7 @@ function errorMessage(error: unknown): string {
  *     Local planner interface with loading, validation, and preview states.
  */
 export default function App(): ReactElement {
-  const [activity, setActivity] = useState<SessionInput["activity"]>("easy_run");
-  const [duration, setDuration] = useState("30");
-  const [zone, setZone] = useState("2-2");
+  const [editor, setEditor] = useState<{ day: string; session: Session | null } | null>(null);
   const [week, setWeek] = useState(initialMonday);
   const [weeks, setWeeks] = useState(1);
   const [blocked, setBlocked] = useState<string[]>([]);
@@ -68,35 +66,34 @@ export default function App(): ReactElement {
     return () => controller.abort();
   }, [week, weeks, revision, validWeek]);
 
-  async function run(operation: () => Promise<void>): Promise<void> {
+  async function run(operation: () => Promise<void>): Promise<boolean> {
     setBusy(true); setError(""); setNotice("");
-    try { await operation(); } catch (cause) { setError(errorMessage(cause)); }
+    try { await operation(); return true; }
+    catch (cause) { setError(errorMessage(cause)); return false; }
     finally { setBusy(false); }
   }
 
-  async function submitSession(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const fields = new FormData(form);
-    const optionalNumber = (name: string): number | null => {
-      const value = String(fields.get(name) ?? "").trim();
-      return value === "" ? null : Number(value);
-    };
-    const session: SessionInput = {
-      day: String(fields.get("day")),
-      activity: fields.get("activity") as SessionInput["activity"],
-      status: fields.get("status") as SessionInput["status"],
-      duration_min: optionalNumber("duration"), effort: optionalNumber("effort"),
-      notes: String(fields.get("notes") ?? ""),
-      hr_zone_min: zone ? Number(zone.split("-")[0]) : null,
-      hr_zone_max: zone ? Number(zone.split("-")[1]) : null,
-    };
-    await run(async () => {
-      await saveSession(session);
-      setRevision((value) => value + 1);
+  async function submitSession(input: SessionInput): Promise<void> {
+    if (busy || !editor) return;
+    const id = editor.session?.id;
+    const saved = await run(async () => {
+      await (id == null ? saveSession(input) : updateSession(id, input));
       setPreview(null);
-      setNotice("Session saved. Generate suggestions when you are ready.");
-      form.reset();
+      setRevision((value) => value + 1);
+      setNotice(`${id == null ? "Session added" : "Session updated"} for ${input.day}.`);
+    });
+    // A rejected save leaves the form and its draft intact for correction/retry.
+    if (saved) setEditor(null);
+  }
+
+  async function changeStatus(session: Session, status: SessionInput["status"]): Promise<void> {
+    if (busy || editor || session.id === null || session.status === status) return;
+    const id = session.id;
+    await run(async () => {
+      const updated = await updateSessionStatus(id, status);
+      setSessions((current) => current.map((item) => item.id === id ? updated : item));
+      setPreview(null);
+      setNotice(`Session marked ${status}.`);
     });
   }
 
@@ -106,6 +103,7 @@ export default function App(): ReactElement {
     await run(async () => {
       await deleteSession(id);
       setSessions((current) => current.filter((item) => item.id !== id));
+      if (editor?.session?.id === id) setEditor(null);
       setPreview(null);
       setRevision((value) => value + 1);
       setNotice("Session deleted. Generate suggestions when you are ready.");
@@ -144,13 +142,15 @@ export default function App(): ReactElement {
       {notice && <p className="message" role="status">{notice}</p>}
       <section aria-labelledby="week-heading">
         <h2 id="week-heading">Your week</h2>
-        <label>Week beginning (Monday)<input type="date" value={week} disabled={busy} required
+        <p className="muted">Add training on any day, or edit a saved activity directly below. Changing the date moves it to that day.</p>
+        <label>Week beginning (Monday)<input type="date" value={week} disabled={busy || editor !== null} required
           onChange={(event) => {
-            setWeek(event.target.value); setBlocked([]); setPreview(null); setError(""); setNotice("");
+            setWeek(event.target.value); setEditor(null); setBlocked([]); setPreview(null); setError(""); setNotice("");
           }} /></label>
-        <label>Planning horizon<select value={weeks} disabled={busy} onChange={(event) => {
+        <label>Planning horizon<select value={weeks} disabled={busy || editor !== null} onChange={(event) => {
           const next = Number(event.target.value);
           setWeeks(next);
+          setEditor(null);
           setBlocked((days) => days.filter((day) => day <= addDays(week, next * 7 - 1)));
           setPreview(null);
           setError(""); setNotice("");
@@ -163,10 +163,25 @@ export default function App(): ReactElement {
             <p role="status">Loading sessions…</p>
           ) : (
             Array.from({ length: weeks }, (_, index) => <WeeklyCalendar
-              key={index}
+              key={addDays(week, index * 7)}
               weekStart={addDays(week, index * 7)}
               sessions={sessions}
               onDelete={removeSession}
+              onStatusChange={changeStatus}
+              onAdd={(day) => { setEditor({ day, session: null }); setError(""); }}
+              onEdit={(session) => { setEditor({ day: session.day, session }); setError(""); }}
+              editor={editor ? {
+                day: editor.day,
+                content: <SessionForm
+                  key={editor.session?.id ?? editor.day}
+                  day={editor.day}
+                  session={editor.session}
+                  disabled={busy}
+                  error={error}
+                  onSave={submitSession}
+                  onCancel={() => { setEditor(null); setError(""); }}
+                />,
+              } : undefined}
               disabled={busy}
               proposals={preview?.sessions ?? []}
               blocked={blocked}
@@ -185,39 +200,6 @@ export default function App(): ReactElement {
             />)
           )
         )}      </section>
-      <section aria-labelledby="log-heading">
-        <h2 id="log-heading">Log or schedule a session</h2>
-        {runPresets[activity] && <p>{runPresets[activity]?.description}</p>}
-        <p className="muted">Plan by total duration and main-set HR zone. Effort / RPE records perceived effort separately.</p>
-        <form onSubmit={submitSession}><fieldset disabled={busy} className="form-grid">
-          <label>Date<input name="day" type="date" defaultValue={localDate(new Date())} required /></label>
-          <label>Activity<select name="activity" value={activity} onChange={(event) => {
-            const next = event.target.value as SessionInput["activity"];
-            const preset = runPresets[next];
-            setActivity(next);
-            setDuration(preset?.minutes == null ? "" : String(preset.minutes));
-            setZone(preset?.low == null ? "" : `${preset.low}-${preset.high}`);
-          }}>{activities.map((value) =>
-            <option key={value} value={value}>{activityLabel(value)}</option>)}</select></label>
-          <label>Target heart-rate zone (main set)<select value={zone}
-            onChange={(event) => setZone(event.target.value)}>
-            <option value="">Unspecified</option>
-            {[1, 2, 3, 4, 5].flatMap((low) => Array.from({ length: 6 - low }, (_, i) => {
-              const high = low + i;
-              return <option key={`${low}-${high}`} value={`${low}-${high}`}>
-                {low === high ? `Z${low}` : `Z${low}-${high}`}
-              </option>;
-            }))}
-          </select></label>
-          <label>Status<select name="status">{statuses.map((value) =>
-            <option key={value} value={value}>{value}</option>)}</select></label>
-          <label>Duration in minutes (optional)<input name="duration" type="number" min="0" max="1440" step="1"
-            value={duration} onChange={(event) => setDuration(event.target.value)} /></label>
-          <label>Effort / RPE (optional)<input name="effort" type="number" min="1" max="10" step="1" /></label>
-          <label>Notes (optional)<input name="notes" type="text" /></label>
-          <button type="submit">Save session</button>
-        </fieldset></form>
-      </section>
       <section aria-labelledby="zones-heading">
         <h2 id="zones-heading">Heart-rate zone guide</h2>
         <p>Five-zone model based on maximum heart rate: Z1 50-60% (very light),
@@ -248,7 +230,7 @@ export default function App(): ReactElement {
               }} />{day}</label>;
           })}</div>
         </fieldset>
-        <button disabled={busy || !validWeek || loading} onClick={generate}>Generate suggestions</button>
+        <button disabled={busy || !validWeek || loading || editor !== null} onClick={generate}>Generate suggestions</button>
         {preview && (
           <div className="preview">
             <h3>Review your proposal</h3>
@@ -273,7 +255,7 @@ export default function App(): ReactElement {
                   Select all
                 </button>
 
-                <button disabled={busy || selectedCount === 0} onClick={accept}>
+                <button disabled={busy || selectedCount === 0 || editor !== null} onClick={accept}>
                   Accept selected ({selectedCount})
                 </button>
               </>

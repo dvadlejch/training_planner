@@ -65,6 +65,7 @@ label {
 
 input,
 select,
+textarea,
 button {
     font: inherit;
     border: 1px solid #aebeb3;
@@ -73,7 +74,8 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
     background: white;
     color: inherit;
 }
@@ -312,4 +314,58 @@ th {
     .calendar-day {
         min-height: 0;
     }
+}
+
+.calendar-day--editing {
+    grid-column: 1 / -1;
+}
+
+.calendar-action {
+    padding: 6px 8px;
+    margin-right: 0;
+    font-size: .8rem;
+}
+
+.calendar-editor {
+    padding: 16px;
+    margin: 12px 0;
+    background: white;
+    border: 1px solid #235d47;
+    border-radius: 8px;
+}
+
+.calendar-editor h4 { margin: 0; }
+.calendar-editor p { font-size: .85rem; }
+.calendar-editor-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    gap: 12px;
+    margin-bottom: 0;
+}
+.calendar-editor-fields input,
+.calendar-editor-fields select,
+.calendar-editor-fields textarea {
+    width: 100%;
+    min-width: 0;
+}
+.calendar-editor-notes,
+.calendar-editor-actions { grid-column: 1 / -1; }
+.calendar-editor textarea { resize: vertical; }
+
+
+.calendar-card--confirmed {
+    background: #eaf1fc;
+    border-color: #7295bc;
+}
+
+.calendar-status-control {
+    margin-top: 10px;
+    font-size: .8rem;
+}
+
+.calendar-status-control select {
+    width: 100%;
+    min-width: 0;
+    padding: 6px 4px;
+    text-transform: capitalize;
 }

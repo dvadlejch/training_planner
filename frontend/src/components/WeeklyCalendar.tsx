@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import type { Session } from "../api/types";
+import { statuses, type Session, type SessionInput } from "../api/types";
 import { activityLabel, zoneLabel } from "../running";
 
 /** Controlled selection for the planner's one-proposal-per-day preview. */
@@ -17,6 +17,10 @@ interface WeeklyCalendarProps {
     blocked?: readonly string[];
     selection?: CalendarSelection;
     onDelete?: (session: Session) => void;
+    onStatusChange?: (session: Session, status: SessionInput["status"]) => void;
+    onAdd?: (day: string) => void;
+    onEdit?: (session: Session) => void;
+    editor?: { day: string; content: ReactElement };
     disabled?: boolean;
 }
 
@@ -48,6 +52,10 @@ export default function WeeklyCalendar({
     blocked = [],
     selection,
     onDelete,
+    onStatusChange,
+    onAdd,
+    onEdit,
+    editor,
     disabled = false,
 }: WeeklyCalendarProps): ReactElement {
     const today = new Date();
@@ -96,7 +104,7 @@ export default function WeeklyCalendar({
                 return (
                     <li
                         key={day}
-                        className={`calendar-day${isToday ? " calendar-day--today" : ""}`}
+                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day ? " calendar-day--editing" : ""}`}
                     >
                         <h3 className="calendar-day-heading">
                             <time dateTime={day} aria-current={isToday ? "date" : undefined}>
@@ -111,6 +119,16 @@ export default function WeeklyCalendar({
                                 Unavailable for suggestions
                             </p>
                         )}
+
+                        {onAdd && (
+                            <button type="button" className="calendar-action secondary"
+                                aria-label={`Add training on ${day}`}
+                                disabled={disabled || editor !== undefined}
+                                onClick={() => onAdd(day)}>
+                                + Add training
+                            </button>
+                        )}
+                        {editor?.day === day && editor.content}
 
                         {items.length === 0 && (
                             <p className="calendar-empty">No sessions</p>
@@ -146,12 +164,48 @@ export default function WeeklyCalendar({
                                     <p className="calendar-card-notes">{session.notes}</p>
                                 )}
 
+                                {!isProposal && session.id !== null && onStatusChange && (
+                                    <>
+                                        <label className="calendar-status-control">Status
+                                            <select
+                                                aria-label={`Status for ${day} ${activityLabel(session.activity)}`}
+                                                value={session.status}
+                                                disabled={disabled || editor !== undefined}
+                                                onChange={(event) => onStatusChange(
+                                                    session, event.target.value as SessionInput["status"],
+                                                )}
+                                            >
+                                                {statuses.map((status) => (
+                                                    <option key={status} value={status}>{status}</option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        {session.status === "planned" && (
+                                            <button type="button" className="calendar-action"
+                                                aria-label={`Confirm ${day} ${activityLabel(session.activity)}`}
+                                                disabled={disabled || editor !== undefined}
+                                                onClick={() => onStatusChange(session, "confirmed")}>
+                                                Confirm
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+
+                                {!isProposal && session.id !== null && onEdit && (
+                                    <button type="button" className="calendar-action secondary"
+                                        aria-label={`Edit ${day} ${activityLabel(session.activity)}`}
+                                        disabled={disabled || editor !== undefined}
+                                        onClick={() => onEdit(session)}>
+                                        Edit
+                                    </button>
+                                )}
+
                                 {!isProposal && session.id !== null && onDelete && (
                                     <button
                                         type="button"
                                         className="calendar-delete"
                                         aria-label={`Delete ${day} ${activityLabel(session.activity)}`}
-                                        disabled={disabled}
+                                        disabled={disabled || editor !== undefined}
                                         onClick={() => {
                                             if (window.confirm(
                                                 `Delete saved ${activityLabel(session.activity)} on ${day} (${session.status})? This cannot be undone.`,

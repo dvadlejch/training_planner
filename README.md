@@ -68,7 +68,7 @@ A calendar item has a start section and an end section (inclusive), so it may oc
 
 The **target** data model distinguishes: proposed/unaccepted, accepted/planned, completed, skipped/cancelled, and non-training commitments. An accepted item is protected from automatic replanning, whether or not it is explicitly marked as locked. Explicitly locked items are never recommended for movement unless the user unlocks them. Completed history remains intact unless the user deliberately corrects it.
 
-These richer states and lock semantics are *planned*; the current prototype only has planned/completed/skipped workout statuses.
+These richer states and lock semantics are *planned*; the current prototype has planned/confirmed/completed/skipped workout statuses. Confirmed means committed but still upcoming; completing a workout is a separate status change. Explicit locks and automatic rescheduling remain future features.
 
 ## 5. Training and activity logging
 
@@ -212,16 +212,17 @@ The user blocks every calendar section. The planner returns **no workout suggest
 
 The starter currently provides:
 
-- A local **React/TypeScript** interface with a week selector, session form and weekly calendar.
+- A local **React/TypeScript** interface with a week selector and an editable weekly calendar. Each day has **Add training**; saved entries have **Edit** and **Delete**. Add/edit forms open inline within the selected day with Save and Cancel controls. Edit the date to move an activity, or change its type, status, duration, HR zone, RPE and notes. Failed saves preserve the draft for correction or retry. Successful changes clear the suggestion preview without automatically replanning.
+- A **Status** dropdown on every saved activity changes planned/confirmed/completed/skipped directly in the calendar. **Confirm** on a planned activity marks it committed but still upcoming. Status changes preserve other workout details and clear the suggestion preview only on success. Confirmed entries remain editable and count as booked training during suggestion generation. `PATCH /api/sessions/{session_id}/status` accepts only `{ "status": "confirmed" }` (or another supported status).
 - A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
-- A **FastAPI** backend with validated session and planning endpoints.
-- SQLite storage using the current sessions schema, with **planned, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
+- A **FastAPI** backend with validated session and planning endpoints, including `PUT /api/sessions/{session_id}` for replacing a saved activity while preserving its identifier (404 if missing).
+- SQLite storage using the current sessions schema, with **planned, confirmed, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
 - An **ephemeral, whole-day** unavailability selector when generating suggestions (not persisted).
 - Explicit **Generate suggestions** and **Accept selected** actions with per-item selection. Generating a preview does not save proposed sessions; acceptance rechecks the calendar and commits the entire batch in one transaction.
 - Deterministic **1-4-week, day-level rules** for gym, easy runs, weekend hikes and flexible long-run dates.
 - Unit tests for the planner/storage and integration tests for API validation, proposal preservation and transactional acceptance.
 
-**Not yet implemented:** the daypart calendar, interactive drag-and-drop, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, editing/completing existing entries, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
+**Not yet implemented:** the daypart calendar, interactive drag-and-drop, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
 
 ## 11. Technical architecture
 
@@ -231,7 +232,7 @@ The project uses Python 3.11+, **FastAPI** for HTTP endpoints, **React 19 + Type
 src/training_planner/
   domain/models.py        # Framework-independent workout types and statuses
   planner/rules.py        # Pure, deterministic rules over a 1-4-week horizon
-  application/services.py # Session creation, previews and transactional acceptance
+  application/services.py # Session CRUD, previews and transactional acceptance
   storage/db.py           # SQLite connection and session repository
   api/app.py              # FastAPI app factory and /api endpoints
   api/schemas.py          # Validated HTTP request/response contracts
@@ -260,7 +261,7 @@ For a future planner, distinguish **hard constraints** (unavailable blocks, acce
 
 ## 12. Installation and development
 
-Prerequisites: Python 3.11+ (uv uses the Python 3.13 development pin) and Node.js 22.12+ with npm. For the Makefile workflow, also install GNU Make and uv and ensure all tools are on PATH. Run from the project root:
+Prerequisites: Python 3.11+ (uv uses the Python 3.13 development pin) and Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+ with npm. For the Makefile workflow, also install GNU Make and uv and ensure all tools are on PATH. Run from the project root:
 
 ```bash
 make install  # Install both backend and frontend dependencies
@@ -288,7 +289,7 @@ npm ci
 npm run dev
 ```
 
-The optional local Node distribution in `.tools/node` is excluded from version control. On a fresh checkout, install Node.js 22.12+ with npm first; the PATH line above is unnecessary if your normal Node installation is already available. The `export` examples use a Unix shell; on Windows with Node/npm on PATH, run `cd frontend`, `npm ci`, and `npm run dev`. Activating the Python virtual environment does not add Node/npm to PATH. PATH changes apply only to the terminal where the export command runs, so repeat it in each new frontend terminal.
+The optional local Node distribution in `.tools/node` is excluded from version control. On a fresh checkout, install Node.js 22.22.2+ (22.x), 24.15.0+ (24.x), or 26+ with npm first; the PATH line above is unnecessary if your normal Node installation is already available. The `export` examples use a Unix shell; on Windows with Node/npm on PATH, run `cd frontend`, `npm ci`, and `npm run dev`. Activating the Python virtual environment does not add Node/npm to PATH. PATH changes apply only to the terminal where the export command runs, so repeat it in each new frontend terminal.
 
 If you are already inside `frontend/` and see `npm: command not found`, run:
 
@@ -323,6 +324,7 @@ the hook commands. Do not bypass failing hooks.
 Frontend checks and build, from `frontend/`:
 
 ```bash
+npm test
 npm run typecheck
 npm run build
 npm run preview

@@ -538,7 +538,7 @@ def test_acceptance_order_preserves_remaining_suggestions(
     assert [{**s, "id": None} for s in saved.json()] == preview
 
 
-@pytest.mark.parametrize("status", ["planned", "completed", "skipped"])
+@pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
 def test_delete_session_persists_and_preserves_other_entries(client, status):
     """Delete only the selected saved activity, regardless of its workout status."""
     saved = client.post(
@@ -581,3 +581,238 @@ def test_accepted_suggestion_can_be_deleted_and_proposed_again(client):
     ).json()[0]
     assert client.delete(f"/api/sessions/{saved['id']}").status_code == 204
     assert {**proposal, "id": None} in client.post("/api/proposals", json=request).json()
+
+
+@pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
+def test_update_session_preserves_identity_and_other_entries(client, status):
+    """Replace all workout fields and move dates without inserting or altering peers."""
+    original = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "gym"}
+    ).json()
+    other = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "cycle"}
+    ).json()
+    replacement = {
+        "day": "2026-10-13",
+        "activity": "interval_run",
+        "status": status,
+        "duration_min": 45,
+        "effort": 8,
+        "hr_zone_min": 4,
+        "hr_zone_max": 5,
+        "notes": "Moved and corrected",
+    }
+    response = client.put(f"/api/sessions/{original['id']}", json=replacement)
+    assert response.status_code == 200
+    updated = {**replacement, "id": original["id"]}
+    assert response.json() == updated
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-18"}
+    ).json() == [other, updated]
+
+
+def test_update_can_clear_optional_metrics(client):
+    """Editing can explicitly clear optional values without changing the identifier."""
+    original = client.post(
+        "/api/sessions",
+        json={
+            "day": "2026-10-06",
+            "activity": "easy_run",
+            "duration_min": 30,
+            "effort": 5,
+            "hr_zone_min": 2,
+            "hr_zone_max": 2,
+            "notes": "Old",
+        },
+    ).json()
+    response = client.put(
+        f"/api/sessions/{original['id']}",
+        json={
+            "day": "2026-10-06",
+            "activity": "gym",
+            "duration_min": None,
+            "effort": None,
+            "hr_zone_min": None,
+            "hr_zone_max": None,
+            "notes": "",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        **original,
+        "activity": "gym",
+        "duration_min": None,
+        "effort": None,
+        "hr_zone_min": None,
+        "hr_zone_max": None,
+        "notes": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"duration_min": -1},
+        {"duration_min": 1441},
+        {"effort": 0},
+        {"effort": 11},
+        {"hr_zone_min": 4, "hr_zone_max": 2},
+        {"hr_zone_min": 2},
+        {"activity": "unknown"},
+        {"status": "unknown"},
+        {"id": 99},
+    ],
+)
+def test_invalid_update_preserves_saved_record(client, change):
+    """Reject invalid metrics, enums and body identifiers without modifying storage."""
+    original = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "gym"}
+    ).json()
+    response = client.put(
+        f"/api/sessions/{original['id']}",
+        json={"day": "2026-10-06", "activity": "gym", **change},
+    )
+    assert response.status_code == 422
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [original]
+
+
+def test_update_missing_session_does_not_insert(client):
+    """Updating a missing identifier returns 404 rather than creating a workout."""
+    response = client.put(
+        "/api/sessions/9999", json={"day": "2026-10-06", "activity": "gym"}
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Session 9999 does not exist"}
+    assert (
+        client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json()
+        == []
+    )
+
+
+def test_editing_accepted_workout_invalidates_stale_suggestions(client):
+    """Explicit edits retain accepted IDs and acceptance still rechecks the calendar.
+
+    Accept one suggestion, then move that saved workout onto another proposed
+    day. The stale proposal for that day must be rejected without losing the edit.
+    """
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    first, second = [{k: v for k, v in s.items() if k != "id"} for s in preview[:2]]
+    saved = client.post(
+        "/api/proposals/accept", json={**request, "proposals": [first]}
+    ).json()[0]
+    edited = client.put(
+        f"/api/sessions/{saved['id']}", json={**first, "day": second["day"]}
+    )
+    assert edited.status_code == 200
+    assert edited.json()["id"] == saved["id"]
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": [second]}
+        ).status_code
+        == 409
+    )
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [edited.json()]
+
+
+def test_status_changes_preserve_details_identity_and_other_records(client):
+    """Persist every status transition while preserving all other saved fields."""
+    saved = client.post(
+        "/api/sessions",
+        json={
+            "day": "2026-10-06",
+            "activity": "interval_run",
+            "duration_min": 45,
+            "effort": 8,
+            "hr_zone_min": 4,
+            "hr_zone_max": 5,
+            "notes": "Keep details",
+        },
+    ).json()
+    other = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "gym"}
+    ).json()
+    for status in ["confirmed", "completed", "skipped", "planned"]:
+        response = client.patch(
+            f"/api/sessions/{saved['id']}/status", json={"status": status}
+        )
+        assert response.status_code == 200
+        assert response.json() == {**saved, "status": status}
+        assert client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json() == [{**saved, "status": status}, other]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"status": None},
+        {"status": "unknown"},
+        {"status": "confirmed", "notes": "Overwrite"},
+        {"status": "confirmed", "id": 99},
+    ],
+)
+def test_invalid_status_change_keeps_original_workout(client, payload):
+    """Reject missing/invalid statuses and extra fields without changing the record."""
+    saved = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "gym"}
+    ).json()
+    response = client.patch(f"/api/sessions/{saved['id']}/status", json=payload)
+    assert response.status_code == 422
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [saved]
+
+
+def test_status_change_missing_workout_returns_404(client):
+    """A status mutation cannot create a missing workout."""
+    response = client.patch("/api/sessions/9999/status", json={"status": "confirmed"})
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Session 9999 does not exist"}
+    assert (
+        client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json()
+        == []
+    )
+
+
+def test_confirmed_workouts_remain_booked_and_preserved_during_planning(client):
+    """Confirmation preserves scheduling constraints without marking workouts complete.
+
+    Compare proposals around a demanding planned workout before and after
+    confirmation, then accept the preview and ensure the confirmed record survives.
+    """
+    saved = client.post(
+        "/api/sessions",
+        json={"day": "2026-10-08", "activity": "interval_run", "effort": 8},
+    ).json()
+    request = {"week_start": "2026-10-05"}
+    before = client.post("/api/proposals", json=request).json()
+    confirmed = client.patch(
+        f"/api/sessions/{saved['id']}/status", json={"status": "confirmed"}
+    ).json()
+    assert confirmed == {**saved, "status": "confirmed"}
+    after = client.post("/api/proposals", json=request).json()
+    assert after == before
+    assert all(item["day"] != saved["day"] for item in after)
+    proposals = [{k: v for k, v in item.items() if k != "id"} for item in after]
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": proposals}
+        ).status_code
+        == 201
+    )
+    assert (
+        confirmed
+        in client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json()
+    )
