@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { Session } from "../api/types";
+import { activityLabel, zoneLabel } from "../running";
 
 /** Controlled selection for the planner's one-proposal-per-day preview. */
 interface CalendarSelection {
@@ -125,7 +126,7 @@ export default function WeeklyCalendar({
                                         : `calendar-card--${session.status}`)
                                 }
                             >
-                                <h4>{session.activity.replaceAll("_", " ")}</h4>
+                                <h4>{activityLabel(session.activity)}</h4>
                                 <p className="calendar-card-status">
                                     {isProposal ? "Suggestion" : session.status}
                                 </p>
@@ -133,6 +134,7 @@ export default function WeeklyCalendar({
                                 {session.duration_min !== null && (
                                     <p>{session.duration_min} min</p>
                                 )}
+                                <p>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</p>
                                 {session.effort !== null && (
                                     <p>RPE {session.effort}/10</p>
                                 )}
@@ -144,7 +146,7 @@ export default function WeeklyCalendar({
                                     <label className="calendar-selection">
                                         <input
                                             type="checkbox"
-                                            aria-label={`Select ${day} ${session.activity.replaceAll("_", " ")}`}
+                                            aria-label={`Select ${day} ${activityLabel(session.activity)}`}
                                             checked={selection.selectedDays.includes(day)}
                                             disabled={selection.disabled}
                                             onChange={(event) =>

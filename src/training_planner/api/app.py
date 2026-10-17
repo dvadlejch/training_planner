@@ -152,7 +152,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         sqlite3.Error
             If the database operation fails.
         """
-        return generate_proposals(path, payload.week_start, payload.blocked)
+        return generate_proposals(
+            path, payload.week_start, payload.blocked, payload.weeks
+        )
 
     @application.post(
         "/api/proposals/accept", response_model=list[SessionResponse], status_code=201
@@ -186,6 +188,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             payload.week_start,
             payload.blocked,
             [Session(**proposal.model_dump()) for proposal in payload.proposals],
+            payload.weeks,
         )
 
     return application

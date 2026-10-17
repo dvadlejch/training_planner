@@ -214,13 +214,13 @@ The starter currently provides:
 
 - A local **React/TypeScript** interface with a week selector, session form and weekly table.
 - A **FastAPI** backend with validated session and planning endpoints.
-- SQLite storage using the existing sessions schema, with **planned, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
+- SQLite storage using the current sessions schema, with **planned, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
 - An **ephemeral, whole-day** unavailability selector when generating suggestions (not persisted).
-- Explicit **Generate suggestions** and **Accept this batch** actions. Generating a preview does not save proposed sessions; acceptance rechecks the calendar and commits the entire batch in one transaction.
-- The existing basic **single-week, day-level rules** for gym, easy run and weekend activity.
+- Explicit **Generate suggestions** and **Accept selected** actions with per-item selection. Generating a preview does not save proposed sessions; acceptance rechecks the calendar and commits the entire batch in one transaction.
+- Deterministic **1-4-week, day-level rules** for gym, easy runs, weekend hikes and flexible long-run dates.
 - Unit tests for the planner/storage and integration tests for API validation, proposal preservation and transactional acceptance.
 
-**Not yet implemented:** the daypart calendar, interactive drag-and-drop, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, item-by-item approval controls in the UI, multi-week proposals, editing/completing existing entries, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses fixed weekdays, can suggest elapsed dates in the selected week, and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
+**Not yet implemented:** the daypart calendar, interactive drag-and-drop, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, editing/completing existing entries, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
 
 ## 11. Technical architecture
 
@@ -229,7 +229,7 @@ The project uses Python 3.11+, **FastAPI** for HTTP endpoints, **React 19 + Type
 ```text
 src/training_planner/
   domain/models.py        # Framework-independent workout types and statuses
-  planner/rules.py        # Pure, deterministic single-week rules
+  planner/rules.py        # Pure, deterministic rules over a 1-4-week horizon
   application/services.py # Session creation, previews and transactional acceptance
   storage/db.py           # SQLite connection and session repository
   api/app.py              # FastAPI app factory and /api endpoints
@@ -251,7 +251,7 @@ README.md                 # Product specification and setup
 
 The interface calls application services through the API. Services coordinate the domain, planner and repository; the domain and planner do not import FastAPI, React or SQLite. HTTP validation lives at the API boundary. Database connections are short-lived, and services own write transactions.
 
-The existing database schema and `data/training.db` location are preserved. No database migration is needed for this reorganization. `TRAINING_PLANNER_DB` can override the location; use an absolute path when launching outside the project root. Versioned migrations remain a follow-on task before expanding the schema.
+The prototype creates the current schema at `data/training.db`. Older database schemas and retired activity categories are not supported; discard development data when changing the schema. `TRAINING_PLANNER_DB` can override the location; use an absolute path when launching outside the project root.
 
 Likely future domain concepts include `CalendarItem`, `TimeBlock`, `Availability`, `GoalPriority`, `TrainingPreference`, `WorkoutMetrics`, `ReadinessEntry`, and `PlanningProposal`, with stable identifiers, optional metrics and explicit ownership/status distinctions. Those types are **proposals**, not current modules or database tables.
 
@@ -266,7 +266,7 @@ make install  # Install both backend and frontend dependencies
 make run      # Start API on port 8000 and frontend on port 5173
 ```
 
-Use `make dev` instead of `make install` to include Python test and lint tools. You can also run `make run-api` and `make run-frontend` in separate terminals. No virtual environment activation is needed for these targets. The Makefile supports Windows and Unix and automatically includes the optional `.tools/node` installation on PATH. On Windows, that installation can contain `node.exe` directly; on Unix it uses `.tools/node/bin`.
+Use `make dev` instead of `make install` to include Python test, lint, and typing tools and install the commit hooks. You can also run `make run-api` and `make run-frontend` in separate terminals. No virtual environment activation is needed for these targets. The Makefile supports Windows and Unix and automatically includes the optional `.tools/node` installation on PATH. On Windows, that installation can contain `node.exe` directly; on Unix it uses `.tools/node/bin`.
 
 To install and run manually without Make or uv:
 
@@ -307,7 +307,17 @@ Backend checks, from the project root with the virtual environment activated:
 python -m pytest -q
 ruff check src tests
 ruff format --check src tests
+mypy
 ```
+
+Every commit must pass Ruff lint, Ruff formatting (89-character line limit), and
+mypy across `src` and `tests`. Install hooks once per checkout with
+`uv sync --extra dev` and `uv run --extra dev pre-commit install` (also done by
+`make backend-dev` / `make dev`). The hooks check the staged snapshot at commit time
+and block commits on failures. They require uv on PATH, including in GUI Git clients.
+Run `make check` for all three checks, or `uv run --extra dev pre-commit run --all-files`.
+After a manual pip installation, run `pre-commit install`; uv is still required by
+the hook commands. Do not bypass failing hooks.
 
 Frontend checks and build, from `frontend/`:
 
@@ -333,3 +343,58 @@ These can be settled during development without blocking the product vision:
 6. The data migration and export strategy as the initial SQLite schema evolves.
 
 Changes to this README should preserve the distinction between **intended requirements**, **MVP scope**, and **already implemented behavior**.
+
+
+## Heart-rate and duration based running
+
+Running is planned by total minutes and a main-set heart-rate zone, rather than distance.
+The session form offers recovery (Z1-2, 20 min), easy (Z2, 30 min), long easy
+(Z2, 45 min), tempo/threshold (Z3-4, 40 min), VO2 max intervals (Z4-5 work bouts,
+45 min), hard endurance (Z3-4, 60 min), and race/maximum-effort test (no fixed zone
+or duration). These are editable examples, not personalized prescriptions.
+
+Zone reference: a five-zone maximum-HR model, Z1 50-60%, Z2 60-70%, Z3 70-80%,
+Z4 80-90%, Z5 90-100%. Zone numbers differ between HRmax, heart-rate reserve and
+threshold-based systems; these percentages are not measured physiological thresholds.
+The heart-rate section includes an optional calculator: enter a whole-number maximum HR
+(50-300 bpm) to see all five bpm ranges instantly. This input is held only in the page
+and is cleared on reload. Lower boundaries are rounded up, upper boundaries exclude the
+next zone, and Z5 includes maximum HR, so integer ranges do not overlap. For example,
+180 bpm gives Z2 108-125 bpm. These are percentage-based estimates; use individually
+calibrated zones when available and conversational effort as the easy-running cross-check.
+HR data remains optional. Run calculator checks with `npm --prefix frontend test`.
+
+Interval example: 10 min easy warm-up, 4 x 4 min hard with 3 x 3 min easy between
+repetitions, then 10 min easy cool-down = 45 min total. The Z4-5 target applies
+only to work bouts, building toward approximately 85-95% HRmax. Heart rate lags
+changes in effort; do not sprint to force the target at the start of a repetition.
+
+The starter scheduler still uses fixed gym weekdays and does not automatically prescribe
+hard running without training history. It now assigns Z2 to running proposals and considers
+saved neighboring-week sessions and newly proposed outings when checking recovery.
+Choose a 1-4-week horizon; proposals and unavailable-day controls cover the whole horizon.
+Hard run categories, Z4-5 targets, RPE >=7, and long endurance outings (>=90 min)
+count as demanding, including easy and recovery runs. Skipped sessions do not count.
+Two calendar days is the default buffer for demanding work; races and demanding outings >=120 min use three.
+These are conservative configurable-in-code heuristics, not measured recovery times.
+Recovery checks protect endurance in either insertion order, including a saved short long-run
+entry next to a proposed hike. Ordinary gym entries have unknown load; explicit demanding
+gym metrics still count. Monday easy runs shorten to 20 minutes around nearby demanding
+work. Non-demanding Monday easy runs of at most 20 minutes are a recovery exception,
+whether saved or proposed, so accepting them does not change compatible suggestions. Hikes stay on Saturdays. Long runs prefer Sunday, then search up
+to six later days within the selected horizon, ahead of default gym/easy-run slots.
+Saved and proposed long runs stay at least seven days apart to avoid piling up deferred runs.
+If no eligible date exists, the suggestion is omitted. Only today and later dates are proposed.
+Blocked days cannot receive training but still count toward recovery in calendar days.
+Acceptance rechecks the whole horizon and neighboring saved work in one transaction.
+Accepted sessions are preserved. Generic gym entries
+cannot identify heavy leg training yet, so that conflict still needs manual review.
+
+Sources consulted:
+- [Polar endurance zones](https://www.polar.com/us-en/guide/endurance-training)
+- [Polar higher-intensity zones](https://www.polar.com/us-en/guide/anaerobic-training)
+- [NTNU CERG interval guidance](https://www.ntnu.edu/cerg/advice)
+- [Polar on heart-rate response lag](https://www.polar.com/blog/power-vs-running-is-heart-rate-training-old-news/)
+
+The category mappings, example durations and calendar buffers are app design choices
+informed by this guidance; they are not universal training prescriptions.

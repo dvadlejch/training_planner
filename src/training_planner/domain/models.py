@@ -10,7 +10,11 @@ class Activity(str, Enum):
 
     GYM = "gym"
     EASY_RUN = "easy_run"
-    QUALITY_RUN = "quality_run"
+    RECOVERY_RUN = "recovery_run"
+    TEMPO_RUN = "tempo_run"
+    INTERVAL_RUN = "interval_run"
+    HARD_ENDURANCE_RUN = "hard_endurance_run"
+    RACE = "race"
     LONG_RUN = "long_run"
     HIKE = "hike"
     CYCLE = "cycle"
@@ -52,3 +56,6 @@ class Session:
     effort: int | None = None
     notes: str = ""
     id: int | None = None
+    # Planned main-set targets in the five-zone model, not measured average HR.
+    hr_zone_min: int | None = None
+    hr_zone_max: int | None = None

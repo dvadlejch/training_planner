@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { Session } from "../api/types";
+import { activityLabel, zoneLabel } from "../running";
 
 /** Optional selection controls for the current whole-day proposal list. */
 interface SessionSelection {
@@ -41,6 +42,7 @@ export default function SessionTable({
           <th scope="col">Activity</th>
           <th scope="col">Status</th>
           <th scope="col">Minutes</th>
+          <th scope="col">Target HR zone</th>
           <th scope="col">RPE</th>
           <th scope="col">Notes</th>
         </tr></thead>
@@ -49,14 +51,15 @@ export default function SessionTable({
             {selection && <td>
               <input
                 type="checkbox"
-                aria-label={`Select ${session.day} ${session.activity.replaceAll("_", " ")}`}
+                aria-label={`Select ${session.day} ${activityLabel(session.activity)}`}
                 checked={selection.selectedDays.includes(session.day)}
                 disabled={selection.disabled}
                 onChange={(event) => selection.onChange(session.day, event.target.checked)}
               />
             </td>}
-            <td>{session.day}</td><td>{session.activity.replaceAll("_", " ")}</td>
+            <td>{session.day}</td><td>{activityLabel(session.activity)}</td>
             <td>{session.status}</td><td>{session.duration_min ?? "—"}</td>
+            <td>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</td>
             <td>{session.effort ?? "—"}</td><td>{session.notes || "—"}</td>
           </tr>
         ))}</tbody>

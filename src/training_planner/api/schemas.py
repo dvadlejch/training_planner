@@ -2,13 +2,14 @@
 
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from training_planner.domain.models import Activity, Status
+from training_planner.domain.running import validate_zone_target
 
 
 class SessionInput(BaseModel):
-    """Validate manually entered sessions and unsaved proposals; blank metrics are null."""
+    """Validate sessions and unsaved proposals; blank metrics are null."""
 
     model_config = ConfigDict(extra="forbid")
     day: date
@@ -17,20 +18,28 @@ class SessionInput(BaseModel):
     duration_min: int | None = Field(default=None, ge=0, le=1440)
     effort: int | None = Field(default=None, ge=1, le=10)
     notes: str = ""
+    hr_zone_min: int | None = Field(default=None, ge=1, le=5)
+    hr_zone_max: int | None = Field(default=None, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_zones(self):
+        validate_zone_target(self.hr_zone_min, self.hr_zone_max)
+        return self
 
 
 class SessionResponse(SessionInput):
-    """Serialize saved sessions or previews, including an optional database identifier."""
+    """Serialize sessions or previews with an optional database identifier."""
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
     id: int | None = None
 
 
 class PlanningRequest(BaseModel):
-    """Describe a single-week request with optional whole-day unavailability."""
+    """Describe a one-to-four-week request with optional whole-day unavailability."""
 
     model_config = ConfigDict(extra="forbid")
     week_start: date
+    weeks: int = Field(default=1, ge=1, le=4)
     blocked: set[date] = Field(default_factory=set)
 
 

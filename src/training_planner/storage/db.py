@@ -11,7 +11,7 @@ DEFAULT_DB = Path("data/training.db")
 
 
 def connect(path: Path = DEFAULT_DB) -> sqlite3.Connection:
-    """Open the local database and initialize the existing session schema.
+    """Open the local database and initialize the current session schema.
 
     Parameters
     ----------
@@ -41,7 +41,9 @@ def connect(path: Path = DEFAULT_DB) -> sqlite3.Connection:
             status TEXT NOT NULL DEFAULT 'planned',
             duration_min INTEGER,
             effort INTEGER,
-            notes TEXT NOT NULL DEFAULT ''
+            notes TEXT NOT NULL DEFAULT '',
+            hr_zone_min INTEGER,
+            hr_zone_max INTEGER
         )""")
         conn.commit()
     except sqlite3.Error:
@@ -79,16 +81,21 @@ def save_session(conn: sqlite3.Connection, session: Session) -> Session:
         session.duration_min,
         session.effort,
         session.notes,
+        session.hr_zone_min,
+        session.hr_zone_max,
     )
     if session.id is None:
         cursor = conn.execute(
-            "INSERT INTO sessions (day, activity, status, duration_min, effort, notes) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO sessions (day, activity, status, duration_min, effort, notes, "
+            "hr_zone_min, hr_zone_max) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             values,
         )
         return replace(session, id=cursor.lastrowid)
     cursor = conn.execute(
-        "UPDATE sessions SET day=?, activity=?, status=?, duration_min=?, effort=?, notes=? "
+        "UPDATE sessions SET day=?, activity=?, status=?, "
+        "duration_min=?, effort=?, notes=?, "
+        "hr_zone_min=?, hr_zone_max=? "
         "WHERE id=?",
         (*values, session.id),
     )
@@ -134,6 +141,8 @@ def list_sessions(conn: sqlite3.Connection, start: date, end: date) -> list[Sess
             duration_min=row["duration_min"],
             effort=row["effort"],
             notes=row["notes"],
+            hr_zone_min=row["hr_zone_min"],
+            hr_zone_max=row["hr_zone_max"],
         )
         for row in rows
     ]
