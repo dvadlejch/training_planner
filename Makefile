@@ -16,10 +16,12 @@ NPM ?= npm
 export PATH := $(CURDIR)/.tools/node/bin:$(PATH)
 endif
 
-.PHONY: help venv install backend-install dev backend-dev frontend-install run run-api run-frontend clean
+.PHONY: check lint typecheck hooks-install help venv install backend-install dev backend-dev frontend-install run run-api run-frontend clean
 
 help:
 	@echo "Available targets:"
+	@echo "  make check  Run Ruff lint, formatting checks, and mypy"
+	@echo "  make hooks-install  Install commit checks for this checkout"
 	@echo "  make venv    Create .venv (install also creates it automatically)"
 	@echo "  make install  Install backend and frontend dependencies"
 	@echo "  make dev    Install backend, dev extra, and frontend dependencies"
@@ -42,6 +44,7 @@ dev: backend-dev frontend-install
 
 backend-dev:
 	$(UV) sync --extra dev
+	$(MAKE) hooks-install
 
 frontend-install:
 	$(NPM) --prefix frontend ci
@@ -57,3 +60,15 @@ run-frontend:
 
 clean:
 	$(UV) run --no-sync python -c "from pathlib import Path; import shutil; root=Path('.'); names={'.pytest_cache', '.ruff_cache', '.mypy_cache', '__pycache__'}; paths=sorted((p for p in root.rglob('*') if p.is_dir() and p.name in names and '.venv' not in p.parts and '.git' not in p.parts), key=lambda p: len(p.parts), reverse=True); [shutil.rmtree(p, ignore_errors=True) for p in paths]"
+
+check: lint typecheck
+
+lint:
+	$(UV) run --extra dev ruff check src tests
+	$(UV) run --extra dev ruff format --check src tests
+
+typecheck:
+	$(UV) run --extra dev mypy src tests
+
+hooks-install:
+	$(UV) run --extra dev pre-commit install

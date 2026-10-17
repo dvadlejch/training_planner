@@ -259,7 +259,7 @@ For a future planner, distinguish **hard constraints** (unavailable blocks, acce
 
 ## 12. Installation and development
 
-Prerequisites: Python 3.11+ and Node.js 22.12+ with npm. For the Makefile workflow, also install GNU Make and uv and ensure all tools are on PATH. Run from the project root:
+Prerequisites: Python 3.11+ (uv uses the Python 3.13 development pin) and Node.js 22.12+ with npm. For the Makefile workflow, also install GNU Make and uv and ensure all tools are on PATH. Run from the project root:
 
 ```bash
 make install  # Install both backend and frontend dependencies
@@ -307,7 +307,7 @@ Backend checks, from the project root with the virtual environment activated:
 python -m pytest -q
 ruff check src tests
 ruff format --check src tests
-mypy
+mypy src tests
 ```
 
 Every commit must pass Ruff lint, Ruff formatting (89-character line limit), and
