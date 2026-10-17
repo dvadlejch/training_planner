@@ -12,7 +12,13 @@ export function sourceUrl(path) {
   if (!url) throw new Error(`Cannot resolve ${path}`);
   if (urls.has(url.href)) return urls.get(url.href);
   const { outputText } = ts.transpileModule(readFileSync(url, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX },
+    // Match tsconfig so native iterables (for example, proposal-selection Sets)
+    // behave like the application build instead of being downleveled as arrays.
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.ReactJSX,
+    },
     fileName: url.pathname,
   });
   const code = outputText.replace(/from (["'])([^"']+)\1/g, (_, _quote, specifier) => {

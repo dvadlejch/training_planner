@@ -12,6 +12,9 @@ interface CalendarSelection {
 /** Calendar data and optional controls for selecting draft suggestions. */
 interface WeeklyCalendarProps {
     weekStart: string;
+    /** A month switches to compact cards and complete month rows. */
+    month?: string;
+    dayCount?: number;
     sessions: readonly Session[];
     proposals?: readonly Session[];
     blocked?: readonly string[];
@@ -20,12 +23,12 @@ interface WeeklyCalendarProps {
     onStatusChange?: (session: Session, status: SessionInput["status"]) => void;
     onAdd?: (day: string) => void;
     onEdit?: (session: Session) => void;
-    editor?: { day: string; content: ReactElement };
+    editor?: { day: string; content?: ReactElement };
     disabled?: boolean;
 }
 
 /**
- * Display seven calendar days with saved workouts and draft suggestions.
+ * Display a week or a full month with saved workouts and draft suggestions.
  *
  * Parameters
  * ----------
@@ -38,7 +41,7 @@ interface WeeklyCalendarProps {
  * Returns
  * -------
  * ReactElement
- *     Weekly calendar with empty days and optional selection controls.
+ *     Calendar with empty days and optional selection controls.
  *
  * Raises
  * ------
@@ -47,6 +50,8 @@ interface WeeklyCalendarProps {
  */
 export default function WeeklyCalendar({
     weekStart,
+    month,
+    dayCount = 7,
     sessions,
     proposals = [],
     blocked = [],
@@ -67,7 +72,7 @@ export default function WeeklyCalendar({
         day: "numeric",
     });
 
-    const days = Array.from({ length: 7 }, (_, offset) => {
+    const days = Array.from({ length: dayCount }, (_, offset) => {
         // Advance local calendar days rather than adding fixed 24-hour intervals.
         // Local noon avoids UTC date shifts and most daylight-saving boundaries.
         const date = new Date(`${weekStart}T12:00:00`);
@@ -86,8 +91,8 @@ export default function WeeklyCalendar({
 
     return (
         <ol
-            className="weekly-calendar"
-            aria-label={`Week beginning ${weekStart}`}
+            className={`weekly-calendar${month ? " monthly-calendar" : ""}`}
+            aria-label={month ? `Month ${month}` : `Week beginning ${weekStart}`}
         >
             {days.map(({ date, day, isToday }) => {
                 // Track proposal ownership explicitly; both drafts and saved workouts
@@ -104,12 +109,13 @@ export default function WeeklyCalendar({
                 return (
                     <li
                         key={day}
-                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day ? " calendar-day--editing" : ""}`}
+                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day && !month ? " calendar-day--editing" : ""}${month && !day.startsWith(month) ? " calendar-day--outside" : ""}`}
                     >
                         <h3 className="calendar-day-heading">
                             <time dateTime={day} aria-current={isToday ? "date" : undefined}>
-                                {weekdayFormat.format(date)}
-                                <small>{dateFormat.format(date)}</small>
+                                {month ? date.getDate() : weekdayFormat.format(date)}
+                                {!month && <small>{dateFormat.format(date)}</small>}
+                                {month && <span className="sr-only"> {dateFormat.format(date)}</span>}
                             </time>
                         </h3>
 
@@ -125,10 +131,10 @@ export default function WeeklyCalendar({
                                 aria-label={`Add training on ${day}`}
                                 disabled={disabled || editor !== undefined}
                                 onClick={() => onAdd(day)}>
-                                + Add training
+                                {month ? "+ Add" : "+ Add training"}
                             </button>
                         )}
-                        {editor?.day === day && editor.content}
+                        {!month && editor?.day === day && editor.content}
 
                         {items.length === 0 && (
                             <p className="calendar-empty">No sessions</p>
@@ -148,88 +154,96 @@ export default function WeeklyCalendar({
                                         : `calendar-card--${session.status}`)
                                 }
                             >
-                                <h4>{activityLabel(session.activity)}</h4>
-                                <p className="calendar-card-status">
-                                    {isProposal ? "Suggestion" : session.status}
-                                </p>
+                                <details open={month ? undefined : true}>
+                                    <summary>
+                                        <h4>{activityLabel(session.activity)}</h4>
+                                        <span className="calendar-card-overview">
+                                            {isProposal ? "Suggestion" : session.status}
+                                            {session.duration_min !== null && ` / ${session.duration_min} min`}
+                                        </span>
+                                    </summary>
+                                    <p className="calendar-card-status">
+                                        {isProposal ? "Suggestion" : session.status}
+                                    </p>
 
-                                {session.duration_min !== null && (
-                                    <p>{session.duration_min} min</p>
-                                )}
-                                <p>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</p>
-                                {session.effort !== null && (
-                                    <p>RPE {session.effort}/10</p>
-                                )}
-                                {session.notes && (
-                                    <p className="calendar-card-notes">{session.notes}</p>
-                                )}
+                                    {session.duration_min !== null && (
+                                        <p>{session.duration_min} min</p>
+                                    )}
+                                    <p>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</p>
+                                    {session.effort !== null && (
+                                        <p>RPE {session.effort}/10</p>
+                                    )}
+                                    {session.notes && (
+                                        <p className="calendar-card-notes">{session.notes}</p>
+                                    )}
 
-                                {!isProposal && session.id !== null && onStatusChange && (
-                                    <>
-                                        <label className="calendar-status-control">Status
-                                            <select
-                                                aria-label={`Status for ${day} ${activityLabel(session.activity)}`}
-                                                value={session.status}
-                                                disabled={disabled || editor !== undefined}
-                                                onChange={(event) => onStatusChange(
-                                                    session, event.target.value as SessionInput["status"],
-                                                )}
-                                            >
-                                                {statuses.map((status) => (
-                                                    <option key={status} value={status}>{status}</option>
-                                                ))}
-                                            </select>
+                                    {!isProposal && session.id !== null && onStatusChange && (
+                                        <>
+                                            <label className="calendar-status-control">Status
+                                                <select
+                                                    aria-label={`Status for ${day} ${activityLabel(session.activity)}`}
+                                                    value={session.status}
+                                                    disabled={disabled || editor !== undefined}
+                                                    onChange={(event) => onStatusChange(
+                                                        session, event.target.value as SessionInput["status"],
+                                                    )}
+                                                >
+                                                    {statuses.map((status) => (
+                                                        <option key={status} value={status}>{status}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            {session.status === "planned" && (
+                                                <button type="button" className="calendar-action"
+                                                    aria-label={`Confirm ${day} ${activityLabel(session.activity)}`}
+                                                    disabled={disabled || editor !== undefined}
+                                                    onClick={() => onStatusChange(session, "confirmed")}>
+                                                    Confirm
+                                                </button>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {!isProposal && session.id !== null && onEdit && (
+                                        <button type="button" className="calendar-action secondary"
+                                            aria-label={`Edit ${day} ${activityLabel(session.activity)}`}
+                                            disabled={disabled || editor !== undefined}
+                                            onClick={() => onEdit(session)}>
+                                            Edit
+                                        </button>
+                                    )}
+
+                                    {!isProposal && session.id !== null && onDelete && (
+                                        <button
+                                            type="button"
+                                            className="calendar-delete"
+                                            aria-label={`Delete ${day} ${activityLabel(session.activity)}`}
+                                            disabled={disabled || editor !== undefined}
+                                            onClick={() => {
+                                                if (window.confirm(
+                                                    `Delete saved ${activityLabel(session.activity)} on ${day} (${session.status})? This cannot be undone.`,
+                                                )) onDelete(session);
+                                            }}
+                                        >
+                                            Delete
+                                        </button>
+                                    )}
+
+                                    {isProposal && selection && (
+                                        <label className="calendar-selection">
+                                            <input
+                                                type="checkbox"
+                                                aria-label={`Select ${day} ${activityLabel(session.activity)}`}
+                                                checked={selection.selectedDays.includes(day)}
+                                                disabled={selection.disabled}
+                                                onChange={(event) =>
+                                                    selection.onChange(day, event.target.checked)
+                                                }
+                                            />
+                                            Select
                                         </label>
-                                        {session.status === "planned" && (
-                                            <button type="button" className="calendar-action"
-                                                aria-label={`Confirm ${day} ${activityLabel(session.activity)}`}
-                                                disabled={disabled || editor !== undefined}
-                                                onClick={() => onStatusChange(session, "confirmed")}>
-                                                Confirm
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-
-                                {!isProposal && session.id !== null && onEdit && (
-                                    <button type="button" className="calendar-action secondary"
-                                        aria-label={`Edit ${day} ${activityLabel(session.activity)}`}
-                                        disabled={disabled || editor !== undefined}
-                                        onClick={() => onEdit(session)}>
-                                        Edit
-                                    </button>
-                                )}
-
-                                {!isProposal && session.id !== null && onDelete && (
-                                    <button
-                                        type="button"
-                                        className="calendar-delete"
-                                        aria-label={`Delete ${day} ${activityLabel(session.activity)}`}
-                                        disabled={disabled || editor !== undefined}
-                                        onClick={() => {
-                                            if (window.confirm(
-                                                `Delete saved ${activityLabel(session.activity)} on ${day} (${session.status})? This cannot be undone.`,
-                                            )) onDelete(session);
-                                        }}
-                                    >
-                                        Delete
-                                    </button>
-                                )}
-
-                                {isProposal && selection && (
-                                    <label className="calendar-selection">
-                                        <input
-                                            type="checkbox"
-                                            aria-label={`Select ${day} ${activityLabel(session.activity)}`}
-                                            checked={selection.selectedDays.includes(day)}
-                                            disabled={selection.disabled}
-                                            onChange={(event) =>
-                                                selection.onChange(day, event.target.checked)
-                                            }
-                                        />
-                                        Select
-                                    </label>
-                                )}
+                                    )}
+                                </details>
                             </article>
                         ))}
                     </li>

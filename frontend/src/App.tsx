@@ -4,20 +4,7 @@ import { type PlanningRequest, type Session, type SessionInput } from "./api/typ
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
 import SessionForm from "./components/SessionForm";
-
-function localDate(date: Date): string {
-  // Calendar dates are local dates: converting to UTC could change the day.
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(day: string, count: number): string {
-  const date = new Date(`${day}T12:00:00`);
-  date.setDate(date.getDate() + count);
-  return localDate(date);
-}
+import { addDays, localDate, monthRange, shiftMonth } from "./calendar";
 
 function initialMonday(): string {
   const today = new Date();
@@ -29,7 +16,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The operation could not be completed.";
 }
 
-/** Render the editable weekly calendar and manual proposal workflow.
+/** Render the editable monthly calendar and manual proposal workflow.
  *
  * Returns
  * -------
@@ -38,6 +25,10 @@ function errorMessage(error: unknown): string {
  */
 export default function App(): ReactElement {
   const [editor, setEditor] = useState<{ day: string; session: Session | null } | null>(null);
+  const [month, setMonth] = useState(() => localDate(new Date()).slice(0, 7));
+  const range = monthRange(month);
+  const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
+    .format(new Date(`${month}-01T12:00:00`));
   const [week, setWeek] = useState(initialMonday);
   const [weeks, setWeeks] = useState(1);
   const [blocked, setBlocked] = useState<string[]>([]);
@@ -56,15 +47,15 @@ export default function App(): ReactElement {
   const selectedCount = preview?.selectedDays.length ?? 0;
 
   useEffect(() => {
-    if (!validWeek) { setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true);
-    listSessions(week, addDays(week, weeks * 7 - 1), controller.signal)
-      .then(setSessions)
+    setSessions([]);
+    listSessions(range.start, range.end, controller.signal)
+      .then((items) => { if (!controller.signal.aborted) setSessions(items); })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(errorMessage(cause)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [week, weeks, revision, validWeek]);
+  }, [range.start, range.end, revision]);
 
   async function run(operation: () => Promise<void>): Promise<boolean> {
     setBusy(true); setError(""); setNotice("");
@@ -79,6 +70,7 @@ export default function App(): ReactElement {
     const saved = await run(async () => {
       await (id == null ? saveSession(input) : updateSession(id, input));
       setPreview(null);
+      setMonth(input.day.slice(0, 7));
       setRevision((value) => value + 1);
       setNotice(`${id == null ? "Session added" : "Session updated"} for ${input.day}.`);
     });
@@ -136,35 +128,31 @@ export default function App(): ReactElement {
 
   return (
     <main>
-      <header><p className="eyebrow">Adaptive Training Planner</p><h1>Make room for training.</h1>
-        <p>Record workouts and review suggestions around your availability.</p></header>
+      <header className="app-header"><p className="eyebrow">Adaptive Training Planner</p><h1>Your training calendar</h1></header>
       {error && <p className="message error" role="alert">{error}</p>}
       {notice && <p className="message" role="status">{notice}</p>}
-      <section aria-labelledby="week-heading">
-        <h2 id="week-heading">Your week</h2>
-        <p className="muted">Add training on any day, or edit a saved activity directly below. Changing the date moves it to that day.</p>
-        <label>Week beginning (Monday)<input type="date" value={week} disabled={busy || editor !== null} required
-          onChange={(event) => {
-            setWeek(event.target.value); setEditor(null); setBlocked([]); setPreview(null); setError(""); setNotice("");
-          }} /></label>
-        <label>Planning horizon<select value={weeks} disabled={busy || editor !== null} onChange={(event) => {
-          const next = Number(event.target.value);
-          setWeeks(next);
-          setEditor(null);
-          setBlocked((days) => days.filter((day) => day <= addDays(week, next * 7 - 1)));
-          setPreview(null);
-          setError(""); setNotice("");
-        }}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>
-          {count} {count === 1 ? "week" : "weeks"}
-        </option>)}</select></label>
-        {!validWeek && <p role="alert">Select a Monday to view a week.</p>}
-        {validWeek && (
-          loading ? (
-            <p role="status">Loading sessions…</p>
-          ) : (
-            Array.from({ length: weeks }, (_, index) => <WeeklyCalendar
-              key={addDays(week, index * 7)}
-              weekStart={addDays(week, index * 7)}
+      <section className="calendar-section" aria-labelledby="month-heading">
+        <div className="calendar-toolbar">
+          <div><p className="eyebrow">Your month</p><h2 id="month-heading">{monthLabel}</h2></div>
+          <nav aria-label="Calendar navigation">
+            <button className="secondary" aria-label="Previous month" disabled={busy || editor !== null}
+              onClick={() => { setMonth(shiftMonth(month, -1)); setError(""); }}>&larr;</button>
+            <button className="secondary" disabled={busy || editor !== null}
+              onClick={() => { setMonth(localDate(new Date()).slice(0, 7)); setError(""); }}>Today</button>
+            <button className="secondary" aria-label="Next month" disabled={busy || editor !== null}
+              onClick={() => { setMonth(shiftMonth(month, 1)); setError(""); }}>&rarr;</button>
+          </nav>
+        </div>
+        <p className="muted calendar-help">Add training on any day. Open a workout to view details, edit or update its status.</p>
+        {loading && <p className="calendar-loading" role="status">Loading sessions...</p>}
+        <div className="month-scroll" tabIndex={0} role="region" aria-label="Full month calendar" aria-busy={loading}>
+          <div className="month-weekdays" aria-hidden="true">
+            {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}
+          </div>
+          <WeeklyCalendar
+              month={month}
+              dayCount={range.days}
+              weekStart={range.start}
               sessions={sessions}
               onDelete={removeSession}
               onStatusChange={changeStatus}
@@ -172,17 +160,8 @@ export default function App(): ReactElement {
               onEdit={(session) => { setEditor({ day: session.day, session }); setError(""); }}
               editor={editor ? {
                 day: editor.day,
-                content: <SessionForm
-                  key={editor.session?.id ?? editor.day}
-                  day={editor.day}
-                  session={editor.session}
-                  disabled={busy}
-                  error={error}
-                  onSave={submitSession}
-                  onCancel={() => { setEditor(null); setError(""); }}
-                />,
               } : undefined}
-              disabled={busy}
+              disabled={busy || loading}
               proposals={preview?.sessions ?? []}
               blocked={blocked}
               selection={preview ? {
@@ -197,28 +176,34 @@ export default function App(): ReactElement {
                   } : null);
                 },
               } : undefined}
-            />)
-          )
-        )}      </section>
-      <section aria-labelledby="zones-heading">
-        <h2 id="zones-heading">Heart-rate zone guide</h2>
-        <p>Five-zone model based on maximum heart rate: Z1 50-60% (very light),
-          Z2 60-70% (easy), Z3 70-80% (moderate), Z4 80-90% (hard), Z5 90-100% (very hard).</p>
-        <HeartRateCalculator />
-        <p>Zone systems differ. Calculated ranges use the percentage model above;
-          they are estimates rather than measured thresholds. Use individually calibrated
-          zones and conversational effort for easy runs. The calculator is optional.</p>
-        <p>Durations are editable examples. Interval targets apply to hard repetitions,
-          with easy warm-up, recoveries and cool-down included in the total time.</p>
-        <p>Scheduling keeps long endurance away from known demanding days. Generic gym
-          entries do not yet identify heavy leg sessions; review those conflicts yourself.</p>
-        <p><a href="https://www.polar.com/us-en/guide/endurance-training">Polar: endurance zones</a>
-          {" | "}<a href="https://www.polar.com/us-en/guide/anaerobic-training">Polar: higher zones</a>
-          {" | "}<a href="https://www.ntnu.edu/cerg/advice">NTNU: interval guidance</a>
-          {" | "}<a href="https://www.polar.com/blog/power-vs-running-is-heart-rate-training-old-news/">Heart-rate response lag</a></p>
+            />
+        </div>
+        {editor && <div className="month-editor"><SessionForm
+          key={editor.session?.id ?? editor.day}
+          day={editor.day} session={editor.session} disabled={busy} error={error}
+          onSave={submitSession} onCancel={() => { setEditor(null); setError(""); }}
+        /></div>}
       </section>
       <section aria-labelledby="proposal-heading">
         <h2 id="proposal-heading">Suggestions</h2>
+        <div className="planning-controls">
+          <label>Week beginning (Monday)<input type="date" value={week} disabled={busy || editor !== null} required
+            onChange={(event) => {
+              const day = event.target.value;
+              setWeek(day);
+              if (day) setMonth(day.slice(0, 7));
+              setBlocked([]); setPreview(null); setError(""); setNotice("");
+            }} /></label>
+          <label>Planning horizon<select value={weeks} disabled={busy || editor !== null} onChange={(event) => {
+            const next = Number(event.target.value);
+            setWeeks(next);
+            setBlocked((days) => days.filter((day) => day <= addDays(week, next * 7 - 1)));
+            setPreview(null); setError(""); setNotice("");
+          }}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>
+            {count} {count === 1 ? "week" : "weeks"}
+          </option>)}</select></label>
+        </div>
+        {!validWeek && <p role="alert">Select a Monday to generate suggestions.</p>}
         <p className="muted">Choose unavailable days across the entire horizon. They still count toward recovery; availability choices are temporary.</p>
         <fieldset disabled={busy || !validWeek}><legend>Unavailable days</legend>
           <div className="days">{validWeek && Array.from({ length: weeks * 7 }, (_, index) => {
@@ -240,7 +225,7 @@ export default function App(): ReactElement {
             ) : (
               <>
                 <p>
-                  Select suggestions in the calendar above, then accept them.
+                  Select suggestions in the calendar above, then accept them. Use the month arrows to review suggestions across months; your selections are kept.
                   Unchecked suggestions remain unsaved.
                 </p>
 
@@ -273,6 +258,23 @@ export default function App(): ReactElement {
             </button>
           </div>
         )}
+      </section>
+      <section aria-labelledby="zones-heading">
+        <h2 id="zones-heading">Heart-rate zone guide</h2>
+        <p>Five-zone model based on maximum heart rate: Z1 50-60% (very light),
+          Z2 60-70% (easy), Z3 70-80% (moderate), Z4 80-90% (hard), Z5 90-100% (very hard).</p>
+        <HeartRateCalculator />
+        <p>Zone systems differ. Calculated ranges use the percentage model above;
+          they are estimates rather than measured thresholds. Use individually calibrated
+          zones and conversational effort for easy runs. The calculator is optional.</p>
+        <p>Durations are editable examples. Interval targets apply to hard repetitions,
+          with easy warm-up, recoveries and cool-down included in the total time.</p>
+        <p>Scheduling keeps long endurance away from known demanding days. Generic gym
+          entries do not yet identify heavy leg sessions; review those conflicts yourself.</p>
+        <p><a href="https://www.polar.com/us-en/guide/endurance-training">Polar: endurance zones</a>
+          {" | "}<a href="https://www.polar.com/us-en/guide/anaerobic-training">Polar: higher zones</a>
+          {" | "}<a href="https://www.ntnu.edu/cerg/advice">NTNU: interval guidance</a>
+          {" | "}<a href="https://www.polar.com/blog/power-vs-running-is-heart-rate-training-old-news/">Heart-rate response lag</a></p>
       </section>
     </main>
   );

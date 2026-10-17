@@ -30,11 +30,13 @@ async function setup(t, initial = [saved]) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  const state = { sessions: structuredClone(initial), requests: [], fail: "", pause: null };
+  const state = { sessions: structuredClone(initial), requests: [], reads: [], fail: "", pause: null, readPause: null };
   t.mock.method(globalThis, "fetch", async (path, options) => {
     const url = new URL(path, "http://localhost");
     const method = options.method;
     if (method === "GET") {
+      state.reads.push({ start: url.searchParams.get("start"), end: url.searchParams.get("end") });
+      if (state.readPause) await state.readPause;
       return Response.json(state.sessions.filter((item) =>
         item.day >= url.searchParams.get("start") && item.day <= url.searchParams.get("end")));
     }
@@ -74,6 +76,11 @@ function button(text) {
   return found;
 }
 async function click(element) {
+  // Open workout details before using controls that are hidden in the month view.
+  const details = element.closest("details:not([open])");
+  if (details && element.tagName !== "SUMMARY") {
+    await act(async () => details.querySelector("summary").click());
+  }
   await act(async () => element.click());
 }
 async function change(element, value) {
@@ -93,14 +100,14 @@ async function submit() {
 // Add on a later calendar week and discard the preview only after persistence.
 test("add training inline on the selected day across a multiweek horizon", async (t) => {
   const state = await setup(t, []);
-  const horizon = [...document.querySelectorAll("select")][0];
+  const horizon = document.querySelector(".planning-controls select");
   await change(horizon, "2");
   await click(button("Generate suggestions"));
   assert.match(document.body.textContent, /Suggested workout/);
   const add = document.querySelectorAll('button[aria-label^="Add training on"]')[10];
   const day = add.getAttribute("aria-label").slice("Add training on ".length);
   await click(add);
-  assert.equal(form().closest(".calendar-day").querySelector("time").dateTime, day);
+  assert.equal(document.querySelectorAll(".monthly-calendar .calendar-day").length % 7, 0);
   assert.equal(form().elements.day.value, day);
   await change(form().elements.activity, "gym");
   await change(form().elements.duration, "45");
@@ -244,7 +251,7 @@ test("saving disables editor controls until the request completes", async (t) =>
   assert.equal(form().querySelector("fieldset").disabled, true);
   assert.equal(button("Cancel").matches(":disabled"), true);
   assert.equal(button("Delete").disabled, true);
-  assert.equal(document.querySelector('input[type="date"]').disabled, true);
+  assert.equal(document.querySelector('.planning-controls input[type="date"]').disabled, true);
   await act(async () => release());
   assert.equal(form(), null);
   assert.equal(state.requests.filter((item) => item.method === "PUT").length, 1);
@@ -317,4 +324,71 @@ test("status controls are disabled during saves and inline editing", async (t) =
   await act(async () => release());
   assert.equal(document.querySelector(".calendar-status-control select").disabled, false);
   assert.equal(state.requests.filter((item) => item.method === "PATCH").length, 1);
+});
+
+// Every month row remains present regardless of the independent proposal horizon.
+test("month is the primary view and horizon changes do not truncate it", async (t) => {
+  const state = await setup(t, []);
+  const calendar = document.querySelector(".monthly-calendar");
+  const dates = [...calendar.querySelectorAll("time")].map((item) => item.dateTime);
+  const month = dateString(new Date()).slice(0, 7);
+  const days = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  assert.equal(dates.filter((day) => day.startsWith(month)).length, days);
+  assert.equal(dates.length % 7, 0);
+  assert.deepEqual(state.reads.at(-1), { start: dates[0], end: dates.at(-1) });
+  assert.equal(document.querySelector("main > section"), calendar.closest("section"));
+  for (const horizon of ["4", "1"]) {
+    await change(document.querySelector(".planning-controls select"), horizon);
+    assert.deepEqual([...calendar.querySelectorAll("time")].map((item) => item.dateTime), dates);
+  }
+  await change(document.querySelector('.planning-controls input[type="date"]'), "");
+  assert.equal(calendar.querySelectorAll("time").length, dates.length);
+  assert.equal(button("Generate suggestions").disabled, true);
+});
+
+// The full grid is rendered before its sessions resolve; editing does not span cells.
+test("navigation retains the month grid during loading and editing", async (t) => {
+  const state = await setup(t, []);
+  let release;
+  state.readPause = new Promise((resolve) => { release = resolve; });
+  await click(document.querySelector('[aria-label="Next month"]'));
+  const calendar = document.querySelector(".monthly-calendar");
+  const count = calendar.children.length;
+  assert.ok(count >= 28 && count <= 42);
+  assert.equal(document.querySelector(".month-scroll").getAttribute("aria-busy"), "true");
+  assert.equal(calendar.querySelector("button").disabled, true);
+  await act(async () => release());
+  await click(calendar.querySelector("button"));
+  assert.ok(form());
+  assert.equal(form().closest(".calendar-day"), null);
+  assert.equal(calendar.children.length, count);
+  assert.equal(document.querySelector('[aria-label="Next month"]').disabled, true);
+  await click(button("Cancel"));
+  await click(button("Today"));
+  assert.equal(calendar.getAttribute("aria-label"), `Month ${dateString(new Date()).slice(0, 7)}`);
+});
+
+// Month navigation preserves unsaved previews and their explicit selections.
+test("suggestion selection survives browsing into another month and back", async (t) => {
+  await setup(t, []);
+  await click(button("Generate suggestions"));
+  await click(document.querySelector(".calendar-card--proposal summary"));
+  await click(document.querySelector('.calendar-selection input'));
+  assert.ok(button("Accept selected (1)"));
+  await click(document.querySelector('[aria-label="Next month"]'));
+  assert.ok(button("Accept selected (1)"));
+  await click(document.querySelector('[aria-label="Previous month"]'));
+  assert.equal(document.querySelector('.calendar-selection input').checked, true);
+  assert.ok(button("Accept selected (1)"));
+});
+
+// Saving a moved workout navigates to its destination without losing its identity.
+test("moving a session across months displays its destination month", async (t) => {
+  const state = await setup(t);
+  await click(button("Edit"));
+  await change(form().elements.day, "2027-02-28");
+  await submit();
+  assert.equal(state.sessions[0].id, saved.id);
+  assert.equal(document.querySelector(".monthly-calendar").getAttribute("aria-label"), "Month 2027-02");
+  assert.equal(document.querySelector(".calendar-card").closest(".calendar-day").querySelector("time").dateTime, "2027-02-28");
 });

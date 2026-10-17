@@ -201,7 +201,7 @@ The user blocks every calendar section. The planner returns **no workout suggest
 
 ### Later enhancements
 
-- Monthly overview, customizable daypart boundaries and multi-day events.
+- Customizable daypart boundaries and multi-day events.
 - More detailed running progression, performance charts and fitness trends.
 - Import/synchronization with sports watches and activity apps (subject to available APIs), and import/export of files.
 - Detailed gym exercises, weights and progression.
@@ -212,7 +212,7 @@ The user blocks every calendar section. The planner returns **no workout suggest
 
 The starter currently provides:
 
-- A local **React/TypeScript** interface with a week selector and an editable weekly calendar. Each day has **Add training**; saved entries have **Edit** and **Delete**. Add/edit forms open inline within the selected day with Save and Cancel controls. Edit the date to move an activity, or change its type, status, duration, HR zone, RPE and notes. Failed saves preserve the draft for correction or retry. Successful changes clear the suggestion preview without automatically replanning.
+- A local **React/TypeScript** interface centered on an editable full-month calendar with Monday-to-Sunday rows, previous/next month navigation and a Today button. All dates remain displayed while loading and editing; narrow screens can scroll the seven-column grid horizontally. Workout cards expand to show details and actions. The 1-4-week suggestion horizon is independent of the month view; navigate between months to review suggestions without losing selections. Each day has **Add training**; saved entries have **Edit** and **Delete**. Add/edit forms open below the month for the selected day with Save and Cancel controls. Edit the date to move an activity, or change its type, status, duration, HR zone, RPE and notes. Failed saves preserve the draft for correction or retry. Successful changes clear the suggestion preview without automatically replanning.
 - A **Status** dropdown on every saved activity changes planned/confirmed/completed/skipped directly in the calendar. **Confirm** on a planned activity marks it committed but still upcoming. Status changes preserve other workout details and clear the suggestion preview only on success. Confirmed entries remain editable and count as booked training during suggestion generation. `PATCH /api/sessions/{session_id}/status` accepts only `{ "status": "confirmed" }` (or another supported status).
 - A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
 - A **FastAPI** backend with validated session and planning endpoints, including `PUT /api/sessions/{session_id}` for replacing a saved activity while preserving its identifier (404 if missing).
@@ -239,7 +239,7 @@ src/training_planner/
 frontend/
   src/api/                # Typed HTTP client and transport types
   src/components/         # Reusable UI components
-  src/App.tsx             # Weekly session and proposal workflows
+  src/App.tsx             # Monthly calendar and proposal workflows
   vite.config.ts          # Local API proxy for development and build preview
   package.json            # Frontend dependencies and commands
   package-lock.json       # Reproducible frontend dependency resolution
