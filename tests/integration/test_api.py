@@ -816,3 +816,192 @@ def test_confirmed_workouts_remain_booked_and_preserved_during_planning(client):
             "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
         ).json()
     )
+
+
+def test_moved_draft_is_reserved_without_saving_and_can_be_accepted(client):
+    """Replanning retains a moved draft, excludes its origin and saves only on accept."""
+    request: dict[str, object] = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    source = next(item for item in preview if item["day"] == "2026-10-06")
+    moved = {key: value for key, value in source.items() if key != "id"}
+    moved["day"] = "2026-10-08"
+    request["moves"] = [{"original_day": source["day"], "session": moved}]
+    response = client.post("/api/proposals", json=request)
+    assert response.status_code == 200, response.text
+    recalculated = response.json()
+    assert {**moved, "id": None} in recalculated
+    assert all(item["day"] != "2026-10-06" for item in recalculated)
+    assert len({item["day"] for item in recalculated}) == len(recalculated)
+    assert (
+        client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json()
+        == []
+    )
+    accepted = client.post(
+        "/api/proposals/accept", json={**request, "proposals": [moved]}
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()[0] == {**moved, "id": accepted.json()[0]["id"]}
+    assert isinstance(accepted.json()[0]["id"], int)
+
+
+def test_draft_move_can_be_accepted_without_recalculating(client):
+    """Keeping a preview still permits accepting a valid explicitly moved draft."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    source = next(item for item in preview if item["day"] == "2026-10-06")
+    moved = {key: value for key, value in source.items() if key != "id"}
+    moved["day"] = "2026-10-08"
+    response = client.post(
+        "/api/proposals/accept",
+        json={
+            **request,
+            "moves": [{"original_day": source["day"], "session": moved}],
+            "proposals": [moved],
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()[0]["day"] == "2026-10-08"
+
+
+@pytest.mark.parametrize(
+    ("destination", "original", "status", "blocked"),
+    [
+        ("2026-10-04", "2026-10-06", "planned", []),
+        ("2026-10-12", "2026-10-06", "planned", []),
+        ("2026-10-08", "2026-10-12", "planned", []),
+        ("2026-10-08", "2026-10-06", "completed", []),
+        ("2026-10-08", "2026-10-06", "confirmed", []),
+        ("2026-10-08", "2026-10-06", "planned", ["2026-10-08"]),
+    ],
+)
+def test_invalid_manual_draft_positions_are_rejected(
+    client, destination, original, status, blocked
+):
+    """Drafts cannot bypass horizon, planned-status or blocked-date constraints."""
+    moved = {"day": destination, "activity": "gym", "status": status}
+    request = {
+        "week_start": "2026-10-05",
+        "blocked": blocked,
+        "moves": [{"original_day": original, "session": moved}],
+    }
+    assert client.post("/api/proposals", json=request).status_code == 409
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": [moved]}
+        ).status_code
+        == 409
+    )
+
+
+@pytest.mark.parametrize("duplicate", ["origin", "destination"])
+def test_duplicate_manual_draft_positions_are_rejected(client, duplicate):
+    """Each moved draft has a unique origin and destination within its request."""
+    first = {
+        "original_day": "2026-10-06",
+        "session": {"day": "2026-10-08", "activity": "gym"},
+    }
+    second = {
+        "original_day": "2026-10-06" if duplicate == "origin" else "2026-10-07",
+        "session": {
+            "day": "2026-10-09" if duplicate == "origin" else "2026-10-08",
+            "activity": "gym",
+        },
+    }
+    response = client.post(
+        "/api/proposals", json={"week_start": "2026-10-05", "moves": [first, second]}
+    )
+    assert response.status_code == 409
+
+
+def test_intervening_booking_rejects_moved_draft_batch_atomically(client):
+    """Acceptance rechecks moved destinations and never partially saves stale batches."""
+    moved = {"day": "2026-10-08", "activity": "gym"}
+    request = {
+        "week_start": "2026-10-05",
+        "moves": [{"original_day": "2026-10-06", "session": moved}],
+    }
+    preview = client.post("/api/proposals", json=request).json()
+    proposals = [{k: v for k, v in item.items() if k != "id"} for item in preview]
+    booking = client.post("/api/sessions", json=moved).json()
+    response = client.post(
+        "/api/proposals/accept", json={**request, "proposals": proposals}
+    )
+    assert response.status_code == 409
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [booking]
+
+
+def test_moved_draft_expires_before_acceptance(client, planning_clock):
+    """A moved preview remains subject to the server's current-date validation."""
+    moved = {"day": "2026-10-08", "activity": "gym"}
+    request = {
+        "week_start": "2026-10-05",
+        "moves": [{"original_day": "2026-10-06", "session": moved}],
+    }
+    assert client.post("/api/proposals", json=request).status_code == 200
+    planning_clock["today"] = date(2026, 10, 9)
+    assert client.post("/api/proposals", json=request).status_code == 409
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": [moved]}
+        ).status_code
+        == 409
+    )
+
+
+def test_replanning_accounts_for_workload_of_unsaved_moved_drafts(client):
+    """A manually positioned hike keeps its date and constrains new endurance work."""
+    moved = {"day": "2026-10-09", "activity": "hike", "duration_min": 180}
+    response = client.post(
+        "/api/proposals",
+        json={
+            "week_start": "2026-10-05",
+            "moves": [{"original_day": "2026-10-10", "session": moved}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    proposals = response.json()
+    assert any(
+        item["day"] == "2026-10-09" and item["activity"] == "hike" for item in proposals
+    )
+    assert all(item["activity"] != "long_run" for item in proposals)
+    assert all(item["day"] != "2026-10-10" for item in proposals)
+
+
+def test_dismissed_suggestions_stay_out_of_recalculation_and_acceptance(client):
+    """Preview exclusions survive regeneration and acceptance without saving anything."""
+    request = {"week_start": "2026-10-05", "dismissed": ["2026-10-06"]}
+    response = client.post("/api/proposals", json=request)
+    assert response.status_code == 200
+    preview = response.json()
+    assert all(item["day"] != "2026-10-06" for item in preview)
+    selected = [
+        {key: value for key, value in item.items() if key != "id"} for item in preview
+    ]
+    accepted = client.post(
+        "/api/proposals/accept", json={**request, "proposals": selected}
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert all(item["day"] != "2026-10-06" for item in accepted.json())
+
+
+def test_dismissed_date_can_receive_an_explicit_draft_move(client):
+    """Dismissing a suggestion leaves its date available for explicit moves."""
+    response = client.post(
+        "/api/proposals",
+        json={
+            "week_start": "2026-10-05",
+            "dismissed": ["2026-10-08"],
+            "moves": [
+                {
+                    "original_day": "2026-10-06",
+                    "session": {"day": "2026-10-08", "activity": "gym"},
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert any(item["day"] == "2026-10-08" for item in response.json())

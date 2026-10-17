@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import { statuses, type Session, type SessionInput } from "../api/types";
 import { activityLabel, zoneLabel } from "../running";
 
@@ -23,6 +23,10 @@ interface WeeklyCalendarProps {
     onStatusChange?: (session: Session, status: SessionInput["status"]) => void;
     onAdd?: (day: string) => void;
     onEdit?: (session: Session) => void;
+    onMove?: (session: Session, day: string) => void;
+    onMoveProposal?: (session: Session, day: string) => void;
+    onEditProposal?: (session: Session) => void;
+    onRemoveProposal?: (session: Session) => void;
     editor?: { day: string; content?: ReactElement };
     disabled?: boolean;
 }
@@ -60,9 +64,36 @@ export default function WeeklyCalendar({
     onStatusChange,
     onAdd,
     onEdit,
+    onMove,
+    onMoveProposal,
+    onEditProposal,
+    onRemoveProposal,
     editor,
     disabled = false,
 }: WeeklyCalendarProps): ReactElement {
+    const dragged = useRef<{ session: Session; isProposal: boolean } | null>(null);
+    const [dropDay, setDropDay] = useState<string | null>(null);
+    const canMove = Boolean(onMove || onMoveProposal) && !disabled && editor === undefined;
+
+    useEffect(() => {
+        dragged.current = null;
+        setDropDay(null);
+    }, [weekStart, month, disabled, editor]);
+
+    function clearDrag(): void {
+        dragged.current = null;
+        setDropDay(null);
+    }
+
+    function draggedSession(day: string): { session: Session; isProposal: boolean } | undefined {
+        const source = dragged.current;
+        if (!canMove || !source) return;
+        const session = source.isProposal
+            ? proposals.find((item) => item === source.session)
+            : sessions.find((item) => item.id === source.session.id);
+        if (session && session.day !== day) return { session, isProposal: source.isProposal };
+    }
+
     const today = new Date();
     const weekdayFormat = new Intl.DateTimeFormat(undefined, {
         weekday: "long",
@@ -109,7 +140,26 @@ export default function WeeklyCalendar({
                 return (
                     <li
                         key={day}
-                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day && !month ? " calendar-day--editing" : ""}${month && !day.startsWith(month) ? " calendar-day--outside" : ""}`}
+                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day && !month ? " calendar-day--editing" : ""}${month && !day.startsWith(month) ? " calendar-day--outside" : ""}${canMove && dropDay === day ? " calendar-day--drop-target" : ""}`}
+                        onDragOver={(event) => {
+                            if (!draggedSession(day)) return;
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            setDropDay(day);
+                        }}
+                        onDragLeave={(event) => {
+                            if (!(event.relatedTarget instanceof Node) ||
+                                !event.currentTarget.contains(event.relatedTarget)) {
+                                setDropDay((current) => current === day ? null : current);
+                            }
+                        }}
+                        onDrop={(event) => {
+                            const session = draggedSession(day);
+                            if (dragged.current !== null) event.preventDefault();
+                            clearDrag();
+                            if (session?.isProposal) onMoveProposal?.(session.session, day);
+                            else if (session) onMove?.(session.session, day);
+                        }}
                     >
                         <h3 className="calendar-day-heading">
                             <time dateTime={day} aria-current={isToday ? "date" : undefined}>
@@ -154,6 +204,29 @@ export default function WeeklyCalendar({
                                         : `calendar-card--${session.status}`)
                                 }
                             >
+                                {((isProposal && onMoveProposal) || (!isProposal && session.id !== null && onMove)) && (
+                                    <button
+                                        type="button"
+                                        className="calendar-drag-handle"
+                                        aria-label={`Move ${day} ${activityLabel(session.activity)}`}
+                                        title="Drag to another day, or click to edit the date"
+                                        draggable={canMove}
+                                        disabled={!canMove}
+                                        onClick={() => isProposal ? onEditProposal?.(session) : onEdit?.(session)}
+                                        onDragStart={(event) => {
+                                            if (!canMove) { event.preventDefault(); return; }
+                                            dragged.current = { session, isProposal };
+                                            event.dataTransfer.effectAllowed = "move";
+                                            event.dataTransfer.setData("text/plain", isProposal ? `proposal-${session.day}` : String(session.id));
+                                            // The browser's drag image floats outside scrollable cells.
+                                            const card = event.currentTarget.closest("article");
+                                            if (card) event.dataTransfer.setDragImage(card, 12, 12);
+                                        }}
+                                        onDragEnd={clearDrag}
+                                    >
+                                        <span aria-hidden="true">&#x283f;</span>
+                                    </button>
+                                )}
                                 <details open={month ? undefined : true}>
                                     <summary>
                                         <h4>{activityLabel(session.activity)}</h4>
@@ -244,6 +317,14 @@ export default function WeeklyCalendar({
                                         </label>
                                     )}
                                 </details>
+                                {isProposal && onRemoveProposal && (
+                                    <button type="button" className="calendar-action secondary"
+                                        aria-label={`Remove suggestion ${day} ${activityLabel(session.activity)}`}
+                                        disabled={disabled || editor !== undefined}
+                                        onClick={() => onRemoveProposal(session)}>
+                                        Remove
+                                    </button>
+                                )}
                             </article>
                         ))}
                     </li>

@@ -60,3 +60,11 @@ class Session:
     # Planned main-set targets in the five-zone model, not measured average HR.
     hr_zone_min: int | None = None
     hr_zone_max: int | None = None
+
+
+@dataclass
+class ProposalMove:
+    """Keep a user-positioned draft and exclude its original suggestion date."""
+
+    original_day: date
+    session: Session

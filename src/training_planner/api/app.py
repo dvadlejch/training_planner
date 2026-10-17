@@ -24,7 +24,7 @@ from training_planner.application.services import (
     remove_session,
     update_session,
 )
-from training_planner.domain.models import Session
+from training_planner.domain.models import ProposalMove, Session
 from training_planner.storage.db import DEFAULT_DB
 
 
@@ -184,7 +184,15 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             If the database operation fails.
         """
         return generate_proposals(
-            path, payload.week_start, payload.blocked, payload.weeks
+            path,
+            payload.week_start,
+            payload.blocked,
+            payload.weeks,
+            [
+                ProposalMove(move.original_day, Session(**move.session.model_dump()))
+                for move in payload.moves
+            ],
+            payload.dismissed,
         )
 
     @application.post(
@@ -220,6 +228,11 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             payload.blocked,
             [Session(**proposal.model_dump()) for proposal in payload.proposals],
             payload.weeks,
+            [
+                ProposalMove(move.original_day, Session(**move.session.model_dump()))
+                for move in payload.moves
+            ],
+            payload.dismissed,
         )
 
     return application

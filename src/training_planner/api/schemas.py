@@ -41,6 +41,14 @@ class SessionResponse(SessionInput):
     id: int | None = None
 
 
+class ProposalMoveInput(BaseModel):
+    """Describe an explicitly positioned, unsaved planned workout."""
+
+    model_config = ConfigDict(extra="forbid")
+    original_day: date
+    session: SessionInput
+
+
 class PlanningRequest(BaseModel):
     """Describe a one-to-four-week request with optional whole-day unavailability."""
 
@@ -48,6 +56,8 @@ class PlanningRequest(BaseModel):
     week_start: date
     weeks: int = Field(default=1, ge=1, le=4)
     blocked: set[date] = Field(default_factory=set)
+    moves: list[ProposalMoveInput] = Field(default_factory=list)
+    dismissed: set[date] = Field(default_factory=set)
 
 
 class AcceptanceRequest(PlanningRequest):

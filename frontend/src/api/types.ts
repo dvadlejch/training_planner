@@ -20,8 +20,15 @@ export interface Session extends SessionInput {
   id: number | null;
 }
 
+export interface ProposalMove {
+  original_day: string;
+  session: SessionInput;
+}
+
 export interface PlanningRequest {
   week_start: string;
   weeks: number;
   blocked: string[];
+  moves?: ProposalMove[];
+  dismissed?: string[];
 }

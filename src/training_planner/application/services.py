@@ -5,7 +5,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
-from training_planner.domain.models import Session, Status
+from training_planner.domain.models import ProposalMove, Session, Status
 from training_planner.domain.running import validate_zone_target
 from training_planner.planner.rules import suggest_week
 from training_planner.storage.db import (
@@ -130,8 +130,59 @@ def remove_session(path: Path, session_id: int) -> None:
             raise LookupError(f"Session {session_id} does not exist")
 
 
+def _suggest_with_moves(
+    week_start: date,
+    existing: list[Session],
+    blocked: set[date],
+    weeks: int,
+    not_before: date,
+    moves: list[ProposalMove],
+    dismissed: set[date],
+) -> list[Session]:
+    """Reserve explicit draft positions and plan around them without saving them.
+
+    Manual draft positions follow the same user control as manually added sessions;
+    they may override preferred weekdays and recovery spacing. Other suggestions
+    still account for their workload. Both original and destination dates must be
+    inside the planning horizon, and destinations must be future, free and available.
+    """
+    end = week_start + timedelta(days=7 * weeks - 1)
+    origins: set[date] = set()
+    occupied = {session.day for session in existing} | blocked
+    pinned: list[Session] = []
+    for move in moves:
+        session = move.session
+        if (
+            move.original_day in origins
+            or not week_start <= move.original_day <= end
+            or not max(week_start, not_before) <= session.day <= end
+            or session.day in occupied
+            or session.status != Status.PLANNED
+            or session.id is not None
+        ):
+            raise ProposalConflict(
+                "A moved suggestion is unavailable; change its date or start a new plan"
+            )
+        origins.add(move.original_day)
+        occupied.add(session.day)
+        pinned.append(session)
+    generated = suggest_week(
+        week_start,
+        existing + pinned,
+        blocked | origins | dismissed,
+        not_before=not_before,
+        weeks=weeks,
+    )
+    return sorted(pinned + generated, key=lambda session: session.day)
+
+
 def generate_proposals(
-    path: Path, week_start: date, blocked: set[date], weeks: int = 1
+    path: Path,
+    week_start: date,
+    blocked: set[date],
+    weeks: int = 1,
+    moves: list[ProposalMove] | None = None,
+    dismissed: set[date] | None = None,
 ) -> list[Session]:
     """Generate a preview without saving any proposed workouts.
 
@@ -147,6 +198,10 @@ def generate_proposals(
         Planning horizon, from one to four weeks.
     blocked : set[date]
         Ephemeral whole-day restrictions for this planning request.
+    moves : list[ProposalMove] | None
+        Explicit unsaved draft positions to retain during generation.
+    dismissed : set[date] | None
+        Dates excluded from automatic suggestions in this preview.
 
     Returns
     -------
@@ -167,8 +222,14 @@ def generate_proposals(
     existing = get_sessions(
         path, week_start - timedelta(days=7), week_start + timedelta(days=7 * weeks + 6)
     )
-    return suggest_week(
-        week_start, existing, blocked, not_before=_planning_date(), weeks=weeks
+    return _suggest_with_moves(
+        week_start,
+        existing,
+        blocked,
+        weeks,
+        _planning_date(),
+        moves or [],
+        dismissed or set(),
     )
 
 
@@ -178,6 +239,8 @@ def accept_proposals(
     blocked: set[date],
     proposals: list[Session],
     weeks: int = 1,
+    moves: list[ProposalMove] | None = None,
+    dismissed: set[date] | None = None,
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
 
@@ -195,6 +258,10 @@ def accept_proposals(
         Same one-to-four-week horizon used for the preview.
     proposals : list[Session]
         Unmodified suggestions selected for acceptance; an empty list is allowed.
+    moves : list[ProposalMove] | None
+        Same explicit draft positions used during generation.
+    dismissed : set[date] | None
+        Same excluded suggestion dates used during generation.
 
     Returns
     -------
@@ -228,8 +295,14 @@ def accept_proposals(
             raise ProposalConflict(
                 "Some selected dates have elapsed; generate suggestions again"
             )
-        available = suggest_week(
-            week_start, existing, blocked, not_before=not_before, weeks=weeks
+        available = _suggest_with_moves(
+            week_start,
+            existing,
+            blocked,
+            weeks,
+            not_before,
+            moves or [],
+            dismissed or set(),
         )
         if len({session.day for session in proposals}) != len(proposals):
             raise ProposalConflict(
