@@ -413,6 +413,99 @@ The preview runs on port 4173 and also requires the backend on port 8000. It is 
 
 The SQLite database is created locally at `data/training.db` on the first session/planning operation. Importing the API or checking `/api/health` does not create a database. The application is currently a single-user local prototype. Backup/sync, migrations, data import and multi-user support are not yet provided.
 
+## Windows application and installer builds
+
+Windows packaging is separate from the two-server development workflow above.
+The packaged application serves the built React interface and API together on
+`http://127.0.0.1:8765`, and opens your default browser after startup. A console
+window remains open: press **Ctrl+C** there to stop the app. Closing the browser
+does not stop the server. A second launch reports an occupied port; use the existing
+window or stop it before relaunching. Advanced users can pass `--no-browser` or
+`--port 8766` to the executable.
+
+Build on Windows with uv, the Node/npm versions listed above, and optionally GNU
+Make. Installer builds additionally require **Inno Setup 6**. Install it from
+[the official download page](https://jrsoftware.org/isdl.php); the script searches
+its usual installation directories, `.tools/inno`, and PATH. For a custom installation,
+set the `ISCC` environment variable to the full path of `ISCC.exe`.
+
+```powershell
+make package-windows    # Runnable folder: dist/TrainingPlanner/
+make installer-windows  # Setup executable: dist/TrainingPlanner-Setup-0.1.0.exe
+make release-windows    # Backend checks/tests and frontend tests/checks, then installer
+```
+
+Without Make, run the same workflow directly from PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Target installer
+# Use -Target package or -Target release for the other workflows.
+```
+
+Builds use `uv sync --locked`, the pinned PyInstaller build extra, and `npm ci`.
+Packaging uses a separate `.venv-build` environment containing runtime and build
+dependencies, keeping development tools out of the distributed application.
+Every package build smoke-tests a temporary copy of the actual executable: frontend
+assets, API health and writes, executable-relative storage, and repeated initialization.
+The installer version comes from `pyproject.toml`. Missing tools or failing commands
+stop the build. Generated files live in ignored `build/` and `dist/` directories;
+builds do not install the app or launch a browser. Packaging refuses to overwrite
+`dist/TrainingPlanner` if it contains a `data/` directory: move an application folder
+you have used before rebuilding. Always distribute the entire packaged folder or
+the setup executable, not just the inner `TrainingPlanner.exe`.
+
+`make clean` removes generated `build/` and `dist/` output, `frontend/dist`,
+frontend build caches, and Python/test/lint caches. It preserves source files,
+Git metadata, virtual environments, installed dependencies and `.tools`.
+Data directories and SQLite files/sidecars are protected: output subfolders
+containing them are kept intact, including used application bundles and installer
+smoke-test results. Sibling installer executables and build intermediates are still
+removed. Linked output is preserved rather than traversed. The command reports
+what it removes or preserves; generated installers must be rebuilt afterward.
+
+The installer asks for a destination, defaulting to
+`%LOCALAPPDATA%\Programs\TrainingPlanner`. Choose a local directory your account
+can write to during ordinary use; `Program Files` is unsuitable for this storage
+layout. Installation runs without requesting administrator privileges. Start menu
+and desktop shortcuts are separate **unchecked** options on every installation.
+Launching the app after installation is also optional and unchecked.
+
+```text
+TrainingPlanner/
+  TrainingPlanner.exe
+  _internal/            # Python runtime, dependencies and built interface
+  data/
+    training.db         # Created by application initialization, never shipped
+  unins000.exe          # Added by the installer
+```
+
+Setup invokes `TrainingPlanner.exe --init-db` and reports initialization failures.
+The app also initializes missing tables on launch. Its database always lives at
+`data/training.db` relative to the executable, independent of shortcuts, working
+directory, or a development `TRAINING_PLANNER_DB` override. No existing checkout
+database is copied, migrated or backed up. Reinstalling preserves existing records;
+uninstalling removes installed application files while leaving application-created
+data in place. Close the app before installing an update. A portable packaged folder
+can be moved while the app is closed. Keep installed copies at their selected location
+so Windows' registered uninstaller and any chosen shortcuts continue to work.
+
+Database migrations, automatic backups and automatic updates remain unimplemented.
+Older incompatible prototype schemas are still unsupported; use a fresh database
+for this test-data stage. Before retaining real history across schema changes,
+implement migrations and a backup policy. Release builds run automated source checks;
+test the resulting installer on a clean Windows machine before distribution.
+
+An optional installer smoke test verifies installation to a path with spaces, absent
+default shortcuts, initialization, reinstallation with saved data, and uninstall data
+preservation. It briefly registers a per-user installation, uninstalls it afterward,
+and leaves logs/test data under `build/`. It refuses to affect an existing installation
+or existing Training Planner shortcuts. It is separate from build commands, which
+never install the application:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows_installer_smoke.ps1
+```
+
 ## 13. Open implementation questions
 
 These can be settled during development without blocking the product vision:

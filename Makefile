@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 UV ?= uv
+POWERSHELL ?= powershell.exe
 
 # Use the checkout's optional Node installation when present, falling back to PATH.
 # Windows recipes must also work when make is launched from PowerShell or Git Bash.
@@ -17,6 +18,7 @@ export PATH := $(CURDIR)/.tools/node/bin:$(PATH)
 endif
 
 .PHONY: check lint typecheck hooks-install help venv install backend-install dev backend-dev frontend-install run run-api run-frontend clean
+.PHONY: package-windows installer-windows release-windows
 
 help:
 	@echo "Available targets:"
@@ -30,7 +32,10 @@ help:
 	@echo "  make run    Start both development servers (Ctrl+C to stop)"
 	@echo "  make run-api  Run the FastAPI development server on port 8000"
 	@echo "  make run-frontend  Run the Vite development server on port 5173"
-	@echo "  make clean   Remove project cache directories"
+	@echo "  make clean   Remove generated builds and caches, preserving local data"
+	@echo "  make package-windows    Build the runnable Windows application folder"
+	@echo "  make installer-windows  Build the Windows setup executable"
+	@echo "  make release-windows    Run checks and tests, then build the Windows installer"
 
 venv:
 	$(UV) venv
@@ -59,7 +64,7 @@ run-frontend:
 	$(NPM) --prefix frontend run dev
 
 clean:
-	$(UV) run --no-sync python -c "from pathlib import Path; import shutil; root=Path('.'); names={'.pytest_cache', '.ruff_cache', '.mypy_cache', '__pycache__'}; paths=sorted((p for p in root.rglob('*') if p.is_dir() and p.name in names and '.venv' not in p.parts and '.git' not in p.parts), key=lambda p: len(p.parts), reverse=True); [shutil.rmtree(p, ignore_errors=True) for p in paths]"
+	$(UV) run --no-sync python src/training_planner/clean.py
 
 check: lint typecheck
 
@@ -72,3 +77,12 @@ typecheck:
 
 hooks-install:
 	$(UV) run --extra dev pre-commit install
+
+package-windows:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Target package -Uv "$(UV)"
+
+installer-windows:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Target installer -Uv "$(UV)"
+
+release-windows:
+	$(POWERSHELL) -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1 -Target release -Uv "$(UV)"

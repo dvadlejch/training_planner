@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from training_planner.api.schemas import (
     AcceptanceRequest,
@@ -33,7 +34,9 @@ from training_planner.domain.models import (
 from training_planner.storage.db import DEFAULT_DB
 
 
-def create_app(database_path: Path | None = None) -> FastAPI:
+def create_app(
+    database_path: Path | None = None, frontend_path: Path | None = None
+) -> FastAPI:
     """Construct the HTTP application without opening or modifying the database.
 
     Parameters
@@ -41,6 +44,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
     database_path : Path or None
         Database override for tests or embedding. Otherwise TRAINING_PLANNER_DB
         is used, falling back to data/training.db relative to the launch directory.
+    frontend_path : Path or None
+        Optional built frontend directory, mounted after the API routes.
 
     Returns
     -------
@@ -246,6 +251,9 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             weekdays=ActivityWeekdays(**payload.weekdays.model_dump()),
             excluded={(item.day, item.activity) for item in payload.excluded},
         )
+
+    if frontend_path is not None:
+        application.mount("/", StaticFiles(directory=frontend_path, html=True))
 
     return application
 
