@@ -43,7 +43,12 @@ def connect(path: Path = DEFAULT_DB) -> sqlite3.Connection:
             effort INTEGER,
             notes TEXT NOT NULL DEFAULT '',
             hr_zone_min INTEGER,
-            hr_zone_max INTEGER
+            hr_zone_max INTEGER,
+            actual_duration_min REAL,
+            distance_km REAL,
+            average_hr_bpm INTEGER,
+            elevation_gain_m REAL,
+            active_calories_kcal REAL
         )""")
         conn.commit()
     except sqlite3.Error:
@@ -83,19 +88,26 @@ def save_session(conn: sqlite3.Connection, session: Session) -> Session:
         session.notes,
         session.hr_zone_min,
         session.hr_zone_max,
+        session.actual_duration_min,
+        session.distance_km,
+        session.average_hr_bpm,
+        session.elevation_gain_m,
+        session.active_calories_kcal,
     )
     if session.id is None:
         cursor = conn.execute(
             "INSERT INTO sessions (day, activity, status, duration_min, effort, notes, "
-            "hr_zone_min, hr_zone_max) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "hr_zone_min, hr_zone_max, actual_duration_min, distance_km, "
+            "average_hr_bpm, elevation_gain_m, active_calories_kcal) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             values,
         )
         return replace(session, id=cursor.lastrowid)
     cursor = conn.execute(
         "UPDATE sessions SET day=?, activity=?, status=?, "
         "duration_min=?, effort=?, notes=?, "
-        "hr_zone_min=?, hr_zone_max=? "
+        "hr_zone_min=?, hr_zone_max=?, actual_duration_min=?, distance_km=?, "
+        "average_hr_bpm=?, elevation_gain_m=?, active_calories_kcal=? "
         "WHERE id=?",
         (*values, session.id),
     )
@@ -156,6 +168,11 @@ def _session_from_row(row: sqlite3.Row) -> Session:
         notes=row["notes"],
         hr_zone_min=row["hr_zone_min"],
         hr_zone_max=row["hr_zone_max"],
+        actual_duration_min=row["actual_duration_min"],
+        distance_km=row["distance_km"],
+        average_hr_bpm=row["average_hr_bpm"],
+        elevation_gain_m=row["elevation_gain_m"],
+        active_calories_kcal=row["active_calories_kcal"],
     )
 
 

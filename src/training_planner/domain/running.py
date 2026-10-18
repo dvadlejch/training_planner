@@ -18,6 +18,13 @@ def validate_zone_target(low: int | None, high: int | None) -> None:
         raise ValueError("Heart-rate zones must satisfy 1 <= minimum <= maximum <= 5")
 
 
+def workload_duration(session: Session) -> float | None:
+    """Prefer recorded duration for completed work, falling back to the plan."""
+    if session.status == Status.COMPLETED and session.actual_duration_min is not None:
+        return session.actual_duration_min
+    return session.duration_min
+
+
 def is_demanding(session: Session) -> bool:
     """Count intensity and long endurance across sports; skipped work has no load."""
     if session.status == Status.SKIPPED or session.activity == Activity.REST:
@@ -35,7 +42,7 @@ def is_demanding(session: Session) -> bool:
                 Activity.HIKE,
                 Activity.CYCLE,
             }
-            and (session.duration_min or 0) >= 90
+            and (workload_duration(session) or 0) >= 90
         )
     )
 
@@ -46,6 +53,6 @@ def recovery_days(session: Session) -> int:
         return 0
     return (
         3
-        if session.activity == Activity.RACE or (session.duration_min or 0) >= 120
+        if session.activity == Activity.RACE or (workload_duration(session) or 0) >= 120
         else 2
     )

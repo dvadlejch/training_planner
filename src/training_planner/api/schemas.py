@@ -16,6 +16,11 @@ class SessionInput(BaseModel):
     activity: Activity
     status: Status = Status.PLANNED
     duration_min: int | None = Field(default=None, ge=0, le=1440)
+    actual_duration_min: float | None = Field(default=None, ge=0, le=1440)
+    distance_km: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    average_hr_bpm: int | None = Field(default=None, ge=1, le=300)
+    elevation_gain_m: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    active_calories_kcal: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     effort: int | None = Field(default=None, ge=1, le=10)
     notes: str = ""
     hr_zone_min: int | None = Field(default=None, ge=1, le=5)

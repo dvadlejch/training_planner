@@ -3,16 +3,17 @@
 from datetime import date, timedelta
 
 from training_planner.domain.models import Activity, Session, Status
-from training_planner.domain.running import recovery_days
+from training_planner.domain.running import recovery_days, workload_duration
 
 
 def _is_short_monday_easy_run(session: Session) -> bool:
     """Identify the easy recovery exception from workout data, regardless of origin."""
+    duration = workload_duration(session)
     return (
         session.activity == Activity.EASY_RUN
         and session.day.weekday() == 0
-        and session.duration_min is not None
-        and session.duration_min <= 20
+        and duration is not None
+        and duration <= 20
         and recovery_days(session) == 0
     )
 

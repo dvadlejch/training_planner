@@ -41,7 +41,7 @@ class Session:
     status
         Planned, confirmed (committed but upcoming), completed, or skipped status.
     duration_min
-        Optional duration in minutes; None means unknown.
+        Optional planned duration in minutes; None means unknown.
     effort
         Optional RPE from 1 to 10; None means unknown.
     notes
@@ -60,6 +60,12 @@ class Session:
     # Planned main-set targets in the five-zone model, not measured average HR.
     hr_zone_min: int | None = None
     hr_zone_max: int | None = None
+    # Recorded results remain independent of training targets.
+    actual_duration_min: float | None = None
+    distance_km: float | None = None
+    average_hr_bpm: int | None = None
+    elevation_gain_m: float | None = None
+    active_calories_kcal: float | None = None
 
 
 @dataclass

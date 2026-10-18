@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { statuses, type Session, type SessionInput } from "../api/types";
-import { activityLabel, zoneLabel } from "../running";
+import { activityLabel } from "../running";
+import { sessionOverview } from "../sessionStats";
+import SessionDetails from "./SessionDetails";
 
 /** Calendar data and optional controls for confirming draft suggestions. */
 interface WeeklyCalendarProps {
@@ -236,29 +238,13 @@ export default function WeeklyCalendar({
                                     <summary>
                                         <h4>{activityLabel(session.activity)}</h4>
                                         <span className="calendar-card-overview">
-                                            {session.duration_min !== null && `${session.duration_min} min`}
-                                            {session.duration_min !== null && session.hr_zone_min !== null && " \u00b7 "}
-                                            {session.hr_zone_min !== null && (session.hr_zone_min === session.hr_zone_max
-                                                ? `Z${session.hr_zone_min}` : `Z${session.hr_zone_min}-${session.hr_zone_max}`)}
+                                            {sessionOverview(session)}
                                         </span>
                                         <span className={`status-badge status-badge--${isProposal ? "proposal" : session.status}`}>
                                             {isProposal ? "Suggestion" : session.status}
                                         </span>
                                     </summary>
-                                    <p className="calendar-card-status">
-                                        {isProposal ? "Suggestion" : session.status}
-                                    </p>
-
-                                    {session.duration_min !== null && (
-                                        <p>{session.duration_min} min</p>
-                                    )}
-                                    <p>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</p>
-                                    {session.effort !== null && (
-                                        <p>RPE {session.effort}/10</p>
-                                    )}
-                                    {session.notes && (
-                                        <p className="calendar-card-notes">{session.notes}</p>
-                                    )}
+                                    <SessionDetails session={session} />
 
                                     {!isProposal && session.id !== null && onStatusChange && (
                                         <>

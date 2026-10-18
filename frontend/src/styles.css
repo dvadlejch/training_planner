@@ -928,3 +928,18 @@ th {
         transition: none;
     }
 }
+
+/* Separate targets, recorded metrics and free-form workout notes. */
+.session-details h5, .session-section-heading {
+    margin: 14px 0 6px;
+    font-size: .72rem;
+    font-weight: 700;
+}
+.session-section-heading, .session-pace { grid-column: 1 / -1; }
+.session-original-plan { grid-column: 1 / -1; font-size: .8rem; }
+.session-details dl { margin: 0; font-size: .75rem; }
+.session-details dl > div { margin-top: 6px; }
+.session-details dt { color: var(--muted); }
+.session-details dd { margin: 0 0 6px; font-weight: 600; overflow-wrap: anywhere; }
+.calendar-card-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.calendar-editor label[hidden] { display: none; }

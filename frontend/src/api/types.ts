@@ -10,6 +10,11 @@ export interface SessionInput {
   activity: typeof activities[number];
   status: typeof statuses[number];
   duration_min: number | null;
+  actual_duration_min: number | null;
+  distance_km: number | null;
+  average_hr_bpm: number | null;
+  elevation_gain_m: number | null;
+  active_calories_kcal: number | null;
   effort: number | null;
   notes: string;
   hr_zone_min: number | null;
