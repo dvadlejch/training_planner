@@ -48,7 +48,7 @@ export default function SessionForm({
     { name: "average_hr_bpm", label: "Average heart rate (bpm)", visible: stats.heartRate, min: 1, max: 300, step: 1 },
     { name: "elevation_gain_m", label: "Elevation gain (m)", visible: stats.elevation, min: 0 },
     { name: "active_calories_kcal", label: "Active calories (kcal)", visible: stats.calories, min: 0 },
-    { name: "effort", label: "Recorded effort / RPE (optional)", visible: true, min: 1, max: 10, step: 1 },
+    { name: "effort", label: "Recorded effort / RPE", visible: true, min: 1, max: 10, step: 1 },
   ] satisfies { name: keyof typeof results; label: string; visible: boolean; min: number; max?: number; step?: number }[];
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -120,8 +120,8 @@ export default function SessionForm({
           {stats.pace && pace && <p className="session-pace">Average pace: {pace} (from actual time)</p>}
         </>}
         {status !== "skipped" && <label className="calendar-editor-notes">
-          {planning ? "Planning notes (optional)" : activity === "gym"
-            ? "Workout notes: exercises, weights and repetitions" : "Notes (optional)"}
+          {planning ? "Planning notes" : activity === "gym"
+            ? "Workout notes: exercises, weights and repetitions" : "Notes"}
           <textarea name="notes" rows={completed && activity === "gym" ? 5 : 2}
             placeholder={completed && activity === "gym" ? "Bench press: 60 kg — 3 × 8\nPull-ups: bodyweight — 8, 7, 6" : undefined}
             value={notes} onChange={(event) => setNotes(event.target.value)} />
