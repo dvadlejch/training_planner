@@ -601,6 +601,11 @@ def test_update_session_preserves_identity_and_other_entries(client, status):
         "hr_zone_min": 4,
         "hr_zone_max": 5,
         "notes": "Moved and corrected",
+        "actual_duration_min": None,
+        "distance_km": None,
+        "average_hr_bpm": None,
+        "elevation_gain_m": None,
+        "active_calories_kcal": None,
     }
     response = client.put(f"/api/sessions/{original['id']}", json=replacement)
     assert response.status_code == 200

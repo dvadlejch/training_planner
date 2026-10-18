@@ -3,6 +3,7 @@
 from contextlib import closing
 from dataclasses import replace
 from datetime import date, timedelta
+from math import isfinite
 from pathlib import Path
 
 from training_planner.domain.models import ProposalMove, Session, Status
@@ -98,6 +99,18 @@ def create_session(path: Path, session: Session) -> Session:
 def _validate_session(session: Session) -> None:
     """Validate optional workout metrics for both creation and editing."""
     validate_zone_target(session.hr_zone_min, session.hr_zone_max)
+    for name, value in (
+        ("actual_duration_min", session.actual_duration_min),
+        ("distance_km", session.distance_km),
+        ("elevation_gain_m", session.elevation_gain_m),
+        ("active_calories_kcal", session.active_calories_kcal),
+    ):
+        if value is not None and (not isfinite(value) or value < 0):
+            raise ValueError(f"{name} must be a finite nonnegative number")
+    if session.actual_duration_min is not None and session.actual_duration_min > 1440:
+        raise ValueError("actual_duration_min must be between 0 and 1440")
+    if session.average_hr_bpm is not None and not 1 <= session.average_hr_bpm <= 300:
+        raise ValueError("average_hr_bpm must be between 1 and 300")
     if session.duration_min is not None and not 0 <= session.duration_min <= 1440:
         raise ValueError("duration_min must be between 0 and 1440")
     if session.effort is not None and not 1 <= session.effort <= 10:
