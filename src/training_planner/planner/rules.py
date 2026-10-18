@@ -40,18 +40,21 @@ def suggest_week(
     not_before: date,
     weeks: int = 1,
 ) -> list[Session]:
-    """Plan 1-4 weeks, preserving bookings and using blocked dates as recovery time.
+    """Plan a rolling 7-28 days from any start date while preserving bookings.
 
     Hikes keep their Saturday slot. Long runs prefer Sunday, then search the next
     six days within the requested horizon. Reserve endurance before default gym
     and Monday easy sessions. Long-run suggestions stay at least seven days apart
     from saved or proposed long runs, avoiding deferred runs piling up.
     """
-    if week_start.weekday() != 0:
-        raise ValueError("week_start must be a Monday")
     if not 1 <= weeks <= 4:
         raise ValueError("weeks must be between 1 and 4")
     end = week_start + timedelta(days=7 * weeks - 1)
+    first_monday = week_start - timedelta(days=week_start.weekday())
+    mondays = [
+        first_monday + timedelta(days=offset)
+        for offset in range(0, (end - first_monday).days + 1, 7)
+    ]
     occupied = {s.day for s in existing} | (blocked or set())
     proposals: list[Session] = []
 
@@ -67,9 +70,9 @@ def suggest_week(
 
     # All hikes are reserved first, including later weeks, so fallback runs
     # cannot force a hike onto a weekday or conflict with another proposal.
-    for week in range(weeks):
+    for monday in mondays:
         hike = Session(
-            week_start + timedelta(days=7 * week + 5),
+            monday + timedelta(days=5),
             Activity.HIKE,
             duration_min=180,
             notes="Long hike; counts as demanding endurance.",
@@ -77,8 +80,8 @@ def suggest_week(
         if not any(recovery_conflict(hike, s) for s in existing + proposals):
             add(hike)
 
-    for week in range(weeks):
-        sunday = week_start + timedelta(days=7 * week + 6)
+    for monday in mondays:
+        sunday = monday + timedelta(days=6)
         for delay in range(7):
             day = sunday + timedelta(days=delay)
             if not available(day):
@@ -111,8 +114,7 @@ def suggest_week(
                 add(run)
                 break
 
-    for week in range(weeks):
-        monday = week_start + timedelta(days=7 * week)
+    for monday in mondays:
         nearby = any(
             abs((s.day - monday).days) < recovery_days(s) for s in existing + proposals
         )

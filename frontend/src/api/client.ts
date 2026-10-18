@@ -107,7 +107,7 @@ export function deleteSession(id: number): Promise<void> {
  * Parameters
  * ----------
  * input : PlanningRequest
- *     Monday week start and temporary unavailable dates.
+ *     Inclusive horizon start date and temporary unavailable dates.
  *
  * Returns
  * -------
@@ -131,6 +131,8 @@ export function generateProposals(input: PlanningRequest): Promise<Session[]> {
  *     Original planning inputs used for the preview.
  * proposals : Session[]
  *     Unmodified preview items selected for acceptance.
+ * confirm : boolean
+ *     Save the validated suggestions as confirmed upcoming workouts.
  *
  * Returns
  * -------
@@ -142,9 +144,9 @@ export function generateProposals(input: PlanningRequest): Promise<Session[]> {
  * Error
  *     If proposals conflict or validation, networking, or JSON decoding fails.
  */
-export function acceptProposals(input: PlanningRequest, proposals: Session[]): Promise<Session[]> {
+export function acceptProposals(input: PlanningRequest, proposals: Session[], confirm = false): Promise<Session[]> {
   // IDs identify persisted sessions, so omit the null preview IDs from input.
   return request("/proposals/accept", {
-    ...input, proposals: proposals.map(({ id: _id, ...session }) => session),
+    ...input, confirm, proposals: proposals.map(({ id: _id, ...session }) => session),
   });
 }

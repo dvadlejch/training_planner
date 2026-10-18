@@ -167,7 +167,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         Parameters
         ----------
         payload : PlanningRequest
-            Monday week start and whole-day restrictions.
+            Inclusive horizon start date and whole-day restrictions.
 
         Returns
         -------
@@ -233,6 +233,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 for move in payload.moves
             ],
             payload.dismissed,
+            confirm=payload.confirm,
         )
 
     return application

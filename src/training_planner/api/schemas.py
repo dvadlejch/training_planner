@@ -50,7 +50,7 @@ class ProposalMoveInput(BaseModel):
 
 
 class PlanningRequest(BaseModel):
-    """Describe a one-to-four-week request with optional whole-day unavailability."""
+    """Describe a rolling 7-28-day request; week_start may be any weekday."""
 
     model_config = ConfigDict(extra="forbid")
     week_start: date
@@ -64,3 +64,4 @@ class AcceptanceRequest(PlanningRequest):
     """Carry the original planning inputs and selected, unmodified proposals."""
 
     proposals: list[SessionInput]
+    confirm: bool = False

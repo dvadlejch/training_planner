@@ -17,6 +17,33 @@ def test_keeps_existing_and_blocked_days_unchanged():
     assert all(s.status == Status.PLANNED for s in proposed)
 
 
+@pytest.mark.parametrize("start_offset", range(7))
+@pytest.mark.parametrize("weeks", [1, 2, 3, 4])
+def test_rolling_horizon_preserves_weekdays_and_bounds(start_offset, weeks):
+    """Any start weekday covers exactly 7-28 days without shifting activity weekdays."""
+    start = date(2026, 10, 26) + timedelta(days=start_offset)
+    proposed = suggest_week(start, [], not_before=start, weeks=weeks)
+    assert proposed
+    assert all(start <= s.day < start + timedelta(days=7 * weeks) for s in proposed)
+    assert len({s.day for s in proposed}) == len(proposed)
+    assert all(
+        s.day.weekday() in (1, 2, 4) for s in proposed if s.activity == Activity.GYM
+    )
+    assert all(s.day.weekday() == 5 for s in proposed if s.activity == Activity.HIKE)
+    assert all(s.day.weekday() == 0 for s in proposed if s.activity == Activity.EASY_RUN)
+
+
+def test_sunday_start_includes_next_wednesday_and_friday():
+    """Starting October 18 includes October 21/23 with Tuesday and Thursday blocked."""
+    start = date(2026, 10, 18)
+    blocked = {date(2026, 10, 20), date(2026, 10, 22)}
+    proposed = suggest_week(start, [], blocked, not_before=start)
+    gym_dates = {s.day for s in proposed if s.activity == Activity.GYM}
+    assert gym_dates == {date(2026, 10, 21), date(2026, 10, 23)}
+    assert all(s.day not in blocked for s in proposed)
+    assert all(start <= s.day <= date(2026, 10, 24) for s in proposed)
+
+
 def test_hard_saturday_skips_sunday_run():
     """A demanding Saturday suppresses the default Sunday long run."""
     monday = date(2026, 10, 5)

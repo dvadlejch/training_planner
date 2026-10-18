@@ -510,15 +510,6 @@ summary {
     background: #f7e8df;
     border-color: #a17461;
 }
-.calendar-selection {
-    flex-direction: row;
-    align-items: center;
-    gap: 6px;
-    margin-top: 10px;
-}
-.calendar-selection input {
-    margin: 0;
-}
 /* Keep the handle outside details so collapsed workouts can still be moved. */
 .calendar-card .calendar-drag-handle {
     float: right;
@@ -587,24 +578,18 @@ summary {
 .planning-controls input, .planning-controls select {
     width: 100%;
 }
-.days {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
-}
-.check {
+.calendar-availability {
     flex-direction: row;
     gap: 6px;
     align-items: center;
     padding: 6px 3px;
     font-size: .68rem;
     font-weight: 400;
-    white-space: nowrap;
 }
-.check input {
+.calendar-availability input {
     margin: 0;
 }
-.check:has(input:checked) {
+.calendar-availability:has(input:checked) {
     background: #e8eddf;
     border-radius: 5px;
 }
@@ -666,35 +651,17 @@ summary {
 .calendar-day .calendar-editor {
     margin: 10px 0;
 }
-.preview {
-    position: sticky;
-    bottom: 12px;
-    z-index: 1;
-    margin-top: 18px;
-    padding: 18px;
-    background: #f0f3e9;
-    border: 1px solid #d3ddc7;
-    border-radius: 10px;
-    box-shadow: 0 4px 16px #283e350a;
-}
-.review-heading {
+.calendar-suggestion-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
+    margin-bottom: 12px;
 }
-.review-heading h3 {
+.calendar-suggestion-toolbar button {
     margin: 0;
 }
-.selection-count {
-    font-size: .7rem;
-    background: #dfe8d5;
-    color: #3c5b35;
-    padding: 4px 9px;
-    border-radius: 20px;
-}
-.preview p {
+.calendar-suggestion-toolbar p {
     font-size: .8rem;
     margin: 8px 0;
 }
@@ -822,9 +789,6 @@ th {
     .planner-sidebar > .month-editor {
         grid-column: 1 / -1;
     }
-    .days {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
     .sidebar-note {
         grid-column: 2;
     }
@@ -948,13 +912,6 @@ th {
     .planner-sidebar {
         display: flex;
     }
-    .days {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .preview {
-        bottom: 8px;
-        padding: 14px;
-    }
     .sidebar-note {
         margin: 4px 0;
     }
@@ -963,9 +920,6 @@ th {
 @media (max-width: 380px) {
     .brand-mark {
         display: none;
-    }
-    .days {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 

@@ -193,7 +193,7 @@ def generate_proposals(
     path : Path
         Database file location.
     week_start : date
-        Monday starting the requested week.
+        Inclusive start date of the rolling horizon, on any weekday.
     weeks : int
         Planning horizon, from one to four weeks.
     blocked : set[date]
@@ -211,7 +211,7 @@ def generate_proposals(
     Raises
     ------
     ValueError
-        If week_start is not a Monday or stored session values are invalid.
+        If the horizon or stored session values are invalid.
     OSError
         If the database directory cannot be created.
     sqlite3.Error
@@ -241,6 +241,7 @@ def accept_proposals(
     weeks: int = 1,
     moves: list[ProposalMove] | None = None,
     dismissed: set[date] | None = None,
+    confirm: bool = False,
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
 
@@ -251,7 +252,7 @@ def accept_proposals(
     path : Path
         Database file location.
     week_start : date
-        Monday used to generate the preview.
+        Inclusive start date used to generate the preview.
     blocked : set[date]
         Whole-day restrictions used to generate the preview.
     weeks : int
@@ -262,6 +263,8 @@ def accept_proposals(
         Same explicit draft positions used during generation.
     dismissed : set[date] | None
         Same excluded suggestion dates used during generation.
+    confirm : bool
+        Save validated suggestions as confirmed upcoming workouts when true.
 
     Returns
     -------
@@ -273,7 +276,7 @@ def accept_proposals(
     ProposalConflict
         If selected suggestions are duplicated, altered, elapsed, or no longer available.
     ValueError
-        If week_start is not a Monday or stored session values are invalid.
+        If the horizon or stored session values are invalid.
     OSError
         If the database directory cannot be created.
     sqlite3.Error
@@ -312,4 +315,9 @@ def accept_proposals(
             raise ProposalConflict(
                 "The calendar or proposals changed; generate suggestions again"
             )
-        return [save_session(conn, session) for session in proposals]
+        return [
+            save_session(
+                conn, replace(session, status=Status.CONFIRMED) if confirm else session
+            )
+            for session in proposals
+        ]

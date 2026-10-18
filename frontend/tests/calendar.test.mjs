@@ -48,10 +48,14 @@ async function setup(t, initial = [saved]) {
     if (url.pathname === "/api/proposals") {
       const pinned = (body.moves ?? []).map((move) => ({ ...move.session, id: null }));
       const generated = { ...saved, id: null, status: "planned", notes: "Suggested workout" };
-      return Response.json(body.moves?.length ? pinned : [generated].filter((item) => !(body.dismissed ?? []).includes(item.day)));
+      return Response.json(body.moves?.length ? pinned : [generated].filter((item) =>
+        !(body.dismissed ?? []).includes(item.day) && !body.blocked.includes(item.day)));
     }
     if (url.pathname === "/api/proposals/accept") {
-      const accepted = body.proposals.map((item, index) => ({ ...item, id: 20 + index }));
+      const accepted = body.proposals.map((item, index) => ({
+        ...item, status: body.confirm ? "confirmed" : item.status,
+        id: 20 + state.sessions.length + index,
+      }));
       state.sessions.push(...accepted);
       return Response.json(accepted, { status: 201 });
     }
@@ -259,7 +263,7 @@ test("saving disables editor controls until the request completes", async (t) =>
   assert.equal(form().querySelector("fieldset").disabled, true);
   assert.equal(button("Cancel").matches(":disabled"), true);
   assert.equal(button("Delete").disabled, true);
-  assert.equal(document.querySelector('.planning-controls input[type="date"]').disabled, true);
+  assert.equal(document.querySelector('.planning-controls select').disabled, true);
   await act(async () => release());
   assert.equal(form(), null);
   assert.equal(state.requests.filter((item) => item.method === "PUT").length, 1);
@@ -349,9 +353,34 @@ test("month is the primary view and horizon changes do not truncate it", async (
     await change(document.querySelector(".planning-controls select"), horizon);
     assert.deepEqual([...calendar.querySelectorAll("time")].map((item) => item.dateTime), dates);
   }
-  await change(document.querySelector('.planning-controls input[type="date"]'), "");
+  assert.equal(document.querySelector('.planning-controls input[type="date"]'), null);
   assert.equal(calendar.querySelectorAll("time").length, dates.length);
-  assert.equal(button("Generate suggestions").disabled, true);
+  assert.equal(button("Generate suggestions").disabled, false);
+  await click(button("Generate suggestions"));
+  assert.equal(state.requests.at(-1).body.week_start, dateString(new Date()));
+});
+
+// Each new generation reads today's date, including after midnight and month rollover.
+test("new suggestions start today regardless of the displayed month", async (t) => {
+  const RealDate = Date;
+  let currentTime = new RealDate(2026, 2, 31, 12).getTime();
+  t.mock.method(globalThis, "Date", class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [currentTime])); }
+    static now() { return currentTime; }
+  });
+  const state = await setup(t, []);
+  assert.equal(document.querySelector('.planning-controls input[type="date"]'), null);
+  await click(document.querySelector('[aria-label="Next month"]'));
+  await click(button("Generate suggestions"));
+  assert.equal(state.requests.at(-1).body.week_start, "2026-03-31");
+  assert.equal(state.requests.at(-1).body.weeks, 1);
+  assert.equal(document.querySelector(".monthly-calendar").getAttribute("aria-label"), "Month 2026-03");
+  currentTime = new RealDate(2026, 3, 1, 12).getTime();
+  await change(document.querySelector(".planning-controls select"), "4");
+  await click(button("Generate suggestions"));
+  assert.equal(state.requests.at(-1).body.week_start, "2026-04-01");
+  assert.equal(state.requests.at(-1).body.weeks, 4);
+  assert.equal(document.querySelector(".monthly-calendar").getAttribute("aria-label"), "Month 2026-04");
 });
 
 // The full grid is rendered before its sessions resolve; editing does not span cells.
@@ -376,18 +405,18 @@ test("navigation retains the month grid during loading and editing", async (t) =
   assert.equal(calendar.getAttribute("aria-label"), `Month ${dateString(new Date()).slice(0, 7)}`);
 });
 
-// Month navigation preserves unsaved previews and their explicit selections.
-test("suggestion selection survives browsing into another month and back", async (t) => {
+// Month navigation preserves unsaved drafts and their direct confirmation action.
+test("suggestions can be confirmed after browsing into another month and back", async (t) => {
   await setup(t, []);
   await click(button("Generate suggestions"));
   await click(document.querySelector(".calendar-card--proposal summary"));
-  await click(document.querySelector('.calendar-selection input'));
-  assert.ok(button("Accept selected (1)"));
+  assert.ok(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   await click(document.querySelector('[aria-label="Next month"]'));
-  assert.ok(button("Accept selected (1)"));
+  assert.ok(button("Dismiss all"));
   await click(document.querySelector('[aria-label="Previous month"]'));
-  assert.equal(document.querySelector('.calendar-selection input').checked, true);
-  assert.ok(button("Accept selected (1)"));
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.ok(document.querySelector(".calendar-card--confirmed"));
 });
 
 // Saving a moved workout navigates to its destination without losing its identity.
@@ -405,6 +434,78 @@ test("moving a session across months displays its destination month", async (t) 
 function dayCell(day) {
   return document.querySelector(`time[datetime="${day}"]`).closest(".calendar-day");
 }
+function availability(day) {
+  return document.querySelector(`input[aria-label="Unavailable for suggestions on ${day}"]`);
+}
+
+// Calendar availability excludes suggestions without changing saved training.
+test("toggle unavailable days in the calendar and regenerate suggestions", async (t) => {
+  const state = await setup(t);
+  assert.equal(document.querySelector(".planning-panel input[type=checkbox]"), null);
+  await click(button("Generate suggestions"));
+  assert.ok(document.querySelector(".calendar-card--proposal"));
+  assert.ok(availability(firstDay).closest(".calendar-day"));
+  await click(availability(firstDay));
+  assert.equal(availability(firstDay).checked, true);
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.deepEqual(state.sessions, [saved]);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.blocked, [firstDay]);
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.match(document.body.textContent, /No eligible dates/);
+  await click(availability(firstDay));
+  assert.equal(availability(firstDay).checked, false);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.blocked, []);
+  assert.ok(document.querySelector(".calendar-card--proposal"));
+  assert.deepEqual(state.sessions, [saved]);
+});
+
+// Availability follows calendar dates across navigation and planning-window changes.
+test("availability survives browsing months and changing the planning horizon", async (t) => {
+  const state = await setup(t, []);
+  const nextDate = new Date();
+  nextDate.setDate(15);
+  nextDate.setMonth(nextDate.getMonth() + 1);
+  const otherDay = dateString(nextDate);
+  await click(availability(firstDay));
+  await click(document.querySelector('[aria-label="Next month"]'));
+  await click(availability(otherDay));
+  await click(document.querySelector('[aria-label="Previous month"]'));
+  assert.equal(availability(firstDay).checked, true);
+  const horizon = document.querySelector(".planning-controls select");
+  await change(horizon, "4");
+  await change(horizon, "1");
+  await click(document.querySelector('[aria-label="Next month"]'));
+  assert.equal(availability(otherDay).checked, true);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.blocked, [firstDay, otherDay]);
+  await click(button("Dismiss all"));
+  await click(document.querySelector('[aria-label="Next month"]'));
+  await click(availability(otherDay));
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.blocked, [firstDay]);
+});
+
+// In-flight work and editors lock availability to keep the planning context stable.
+test("availability is disabled while editing and generating suggestions", async (t) => {
+  const state = await setup(t);
+  await click(button("Edit"));
+  assert.equal(availability(firstDay).disabled, true);
+  await click(availability(firstDay));
+  assert.equal(availability(firstDay).checked, false);
+  await click(button("Cancel"));
+  assert.equal(availability(firstDay).disabled, false);
+  let release;
+  state.pause = new Promise((resolve) => { release = resolve; });
+  await click(button("Generate suggestions"));
+  assert.equal(availability(firstDay).disabled, true);
+  await click(availability(firstDay));
+  assert.equal(availability(firstDay).checked, false);
+  await act(async () => { release(); });
+  assert.equal(availability(firstDay).disabled, false);
+});
+
 function moveHandle() { return document.querySelector(".calendar-drag-handle"); }
 function transfer() {
   return { effectAllowed: "", dropEffect: "", setData() {}, setDragImage() {} };
@@ -463,7 +564,6 @@ test("drag a collapsed saved workout onto an occupied date without reloading", a
 test("drag into a shaded adjacent-month date keeps the month stable", async (t) => {
   const workout = { ...saved, day: "2026-10-05" };
   const state = await setup(t, [workout]);
-  await change(document.querySelector('.planning-controls input[type="date"]'), workout.day);
   assert.ok(dayCell("2026-09-28").classList.contains("calendar-day--outside"));
   await dropOn("2026-09-28");
   assert.deepEqual(state.sessions, [{ ...workout, day: "2026-09-28" }]);
@@ -579,20 +679,22 @@ async function prepareDraft(t) {
     }
     return response;
   });
-  await change(document.querySelector('.planning-controls input[type="date"]'), origin);
+  await change(document.querySelector('.planning-controls select'), "4");
   await click(button("Generate suggestions"));
+  while (document.querySelector('.monthly-calendar').getAttribute('aria-label') !== `Month ${origin.slice(0, 7)}`) {
+    await click(document.querySelector('[aria-label="Next month"]'));
+  }
   const targetDate = new Date(`${origin}T12:00:00`);
   targetDate.setDate(targetDate.getDate() + 1);
   return { state, origin, target: dateString(targetDate) };
 }
 
-// Moving a draft requires no approval or storage write, and keeps its selection.
+// Moving a draft requires no approval or storage write before direct confirmation.
 test("moved suggestions remain unsaved and can be accepted at their new dates", async (t) => {
   const { state, origin, target } = await prepareDraft(t);
   let confirmations = 0;
   t.mock.method(window, "confirm", () => { confirmations += 1; return false; });
   await click(document.querySelector(".calendar-card--proposal summary"));
-  await click(document.querySelector(".calendar-selection input"));
   await dropOn(target);
   assert.equal(confirmations, 0);
   assert.deepEqual(state.sessions, []);
@@ -601,18 +703,19 @@ test("moved suggestions remain unsaved and can be accepted at their new dates", 
   assert.equal(dayCell(origin).querySelector(".calendar-card--proposal"), null);
   assert.ok(document.querySelector("dialog[open]"));
   await click(button("Keep current suggestions"));
-  assert.ok(button("Accept selected (1)"));
-  await click(button("Accept selected (1)"));
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   assert.equal(state.sessions[0].day, target);
   const request = state.requests.at(-1);
   assert.equal(request.path, "/api/proposals/accept");
+  assert.equal(request.body.confirm, true);
+  assert.equal(state.sessions[0].status, "confirmed");
   assert.equal(request.body.moves[0].original_day, origin);
   assert.equal(request.body.moves[0].session.day, target);
   assert.equal(request.body.moves[0].session.id, undefined);
 });
 
 // Replanning is explicit and retains manually moved positions without storing them.
-test("recalculate after a draft move reserves its date and clears selections", async (t) => {
+test("recalculate after a draft move reserves its date without saving it", async (t) => {
   const { state, origin, target } = await prepareDraft(t);
   await dropOn(target);
   assert.equal(state.requests.length, 1);
@@ -621,7 +724,7 @@ test("recalculate after a draft move reserves its date and clears selections", a
   assert.equal(state.requests.length, 2);
   assert.equal(state.requests.at(-1).body.moves[0].original_day, origin);
   assert.ok(dayCell(target).querySelector(".calendar-card--proposal"));
-  assert.ok(button("Accept selected (0)"));
+  assert.ok(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   assert.deepEqual(state.sessions, []);
   const next = new Date(`${target}T12:00:00`);
   next.setDate(next.getDate() + 1);
@@ -663,7 +766,7 @@ test("planned moves skip approval and recalculate only after the dialog choice",
 test("invalid suggestion drops stay in place without asking to reschedule", async (t) => {
   const { state, origin, target } = await prepareDraft(t);
   await click(button("Dismiss all"));
-  const unavailable = [...document.querySelectorAll('.days input')].find((item) => item.parentElement.textContent === target);
+  const unavailable = document.querySelector(`input[aria-label="Unavailable for suggestions on ${target}"]`);
   await click(unavailable);
   await click(button("Generate suggestions"));
   await dropOn(target);
@@ -733,8 +836,7 @@ test("remove a collapsed suggestion without touching saved workouts", async (t) 
   assert.equal(remove.closest("details"), null);
   assert.equal(remove.closest("article").querySelector("details").open, false);
   await click(document.querySelector(".calendar-card--proposal summary"));
-  await click(document.querySelector(".calendar-selection input"));
-  assert.ok(button("Accept selected (1)"));
+  assert.ok(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   const requests = state.requests.length;
   await click(remove);
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
@@ -767,8 +869,8 @@ test("dismissed dates survive recalculation and reset for a fresh plan", async (
   assert.ok(document.querySelector(".calendar-card--proposal"));
 });
 
-// Remaining selected drafts carry the removal and no stale move into acceptance.
-test("removing one draft keeps other selections and excludes its old reservation", async (t) => {
+// Confirming a remaining draft carries the removal and no stale move into acceptance.
+test("removing one draft keeps other suggestions and excludes its old reservation", async (t) => {
   const { state, origin, target } = await prepareDraft(t);
   await dropOn(target);
   await click(button("Keep current suggestions"));
@@ -790,11 +892,9 @@ test("removing one draft keeps other selections and excludes its old reservation
   const removedDay = dateString(movedAgain);
   await dropOn(removedDay);
   await click(button("Recalculate"));
-  await click(button("Select all"));
   await click(dayCell(removedDay).querySelector('button[aria-label^="Remove suggestion "]'));
-  assert.ok(button("Accept selected (1)"));
   await click(button("Keep current suggestions"));
-  await click(button("Accept selected (1)"));
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   const request = state.requests.at(-1);
   assert.deepEqual(request.body.moves, []);
   assert.deepEqual(request.body.dismissed, [removedDay, origin]);
@@ -802,12 +902,14 @@ test("removing one draft keeps other selections and excludes its old reservation
   assert.equal(request.body.proposals[0].day, remainingDay);
 });
 
-// Editing a workout disables draft removal so an active form cannot lose its context.
-test("suggestion removal is disabled during editing and a pending save", async (t) => {
+// Editing locks suggestion actions so an active form cannot lose its draft context.
+test("suggestion actions are disabled during editing and a pending save", async (t) => {
   const state = await setup(t);
   await click(button("Generate suggestions"));
   await click(button("Edit"));
   assert.equal(button("Remove").disabled, true);
+  assert.equal(button("Dismiss all").disabled, true);
+  assert.equal(document.querySelector('button[aria-label^="Confirm suggestion "]').disabled, true);
   await click(button("Remove"));
   assert.ok(document.querySelector(".calendar-card--proposal"));
   await click(button("Cancel"));
@@ -853,18 +955,96 @@ test("Plan training opens the tools panel without generating suggestions", async
   assert.deepEqual(state.requests, []);
 });
 
-// Hiding planning options must preserve draft selection and nearby acceptance controls.
-test("suggestion review stays usable when the planning panel is collapsed", async (t) => {
+// A collapsed suggestion can be confirmed while the planning panel is hidden.
+test("calendar suggestion actions stay usable when the planning panel is collapsed", async (t) => {
   const state = await setup(t, []);
   await click(button("Generate suggestions"));
-  await click(button("Select all"));
   const panel = document.querySelector(".planning-panel");
   panel.open = false;
-  const review = document.querySelector('[aria-label="Suggestion review"]');
-  assert.ok(review.closest(".calendar-section"));
-  assert.equal(review.closest("details"), null);
-  assert.equal(review.querySelector(".selection-count").textContent, "1 selected");
-  await click(button("Accept selected (1)"));
+  const toolbar = document.querySelector('[role="group"][aria-label="Suggestion actions"]');
+  assert.ok(toolbar.closest(".calendar-section"));
+  assert.equal(toolbar.closest("details"), null);
+  const confirm = document.querySelector('button[aria-label^="Confirm suggestion "]');
+  assert.ok(confirm.closest(".calendar-card--proposal"));
+  assert.equal(confirm.closest("details"), null);
+  assert.equal(confirm.closest("article").querySelector("details").open, false);
+  assert.equal(document.querySelector(".calendar-selection"), null);
+  assert.equal(document.body.textContent.includes("Select all"), false);
+  assert.equal(document.body.textContent.includes("Accept selected"), false);
+  assert.equal(document.querySelector('[aria-label="Suggestion review"]'), null);
+  assert.equal(document.querySelector(".preview"), null);
+  assert.equal(document.body.textContent.includes("Review your proposal"), false);
+  await click(confirm);
   assert.equal(state.requests.at(-1).path, "/api/proposals/accept");
   assert.equal(state.requests.at(-1).body.proposals.length, 1);
+  assert.equal(state.requests.at(-1).body.confirm, true);
+  assert.equal(state.sessions[0].status, "confirmed");
+  assert.equal(document.querySelector('[aria-label="Suggestion actions"]'), null);
+});
+
+// Dismissing suggestions without confirming any of them never writes to storage.
+test("calendar suggestions can be dismissed without saving", async (t) => {
+  const state = await setup(t, []);
+  await click(button("Generate suggestions"));
+  assert.ok(document.querySelector('button[aria-label^="Confirm suggestion "]'));
+  const requests = state.requests.length;
+  await click(button("Dismiss all"));
+  assert.equal(state.requests.length, requests);
+  assert.deepEqual(state.sessions, []);
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.equal(document.querySelector('[aria-label="Suggestion actions"]'), null);
+});
+
+// A rejected confirmation preserves the draft for an explicit retry.
+test("calendar confirmation failure retains suggestions for retry", async (t) => {
+  const state = await setup(t, []);
+  await click(button("Generate suggestions"));
+  state.fail = "POST";
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
+  assert.match(document.querySelector('[role="alert"]').textContent, /Cannot save right now/);
+  assert.ok(document.querySelector(".calendar-card--proposal"));
+  assert.equal(document.querySelector('button[aria-label^="Confirm suggestion "]').disabled, false);
+  assert.deepEqual(state.sessions, []);
+  state.fail = "";
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
+  assert.equal(state.sessions.length, 1);
+  assert.equal(document.querySelector('[aria-label="Suggestion actions"]'), null);
+});
+
+// Confirming one moved draft leaves the other draft usable without stale reservations.
+test("confirm suggestions individually and drop accepted move metadata", async (t) => {
+  const { state, origin, target } = await prepareDraft(t);
+  await dropOn(target);
+  const originalFetch = globalThis.fetch;
+  const otherDate = new Date(`${target}T12:00:00`);
+  otherDate.setDate(otherDate.getDate() + 1);
+  const otherDay = dateString(otherDate);
+  t.mock.method(globalThis, "fetch", async (path, options) => {
+    const response = await originalFetch(path, options);
+    if (path === "/api/proposals" && response.ok) {
+      return Response.json([
+        ...await response.json(),
+        { ...saved, id: null, day: otherDay, status: "planned" },
+      ]);
+    }
+    return response;
+  });
+  await click(button("Recalculate"));
+  let release;
+  state.pause = new Promise((resolve) => { release = resolve; });
+  const confirm = dayCell(target).querySelector('button[aria-label^="Confirm suggestion "]');
+  await click(confirm);
+  assert.equal(confirm.disabled, true);
+  assert.equal(dayCell(otherDay).querySelector('button[aria-label^="Confirm suggestion "]').disabled, true);
+  await act(async () => { release(); });
+  state.pause = null;
+  assert.equal(state.sessions.length, 1);
+  assert.equal(state.sessions[0].status, "confirmed");
+  assert.ok(dayCell(otherDay).querySelector(".calendar-card--proposal"));
+  await click(dayCell(otherDay).querySelector('button[aria-label^="Confirm suggestion "]'));
+  assert.equal(state.sessions.length, 2);
+  assert.equal(state.requests.at(-1).body.proposals.length, 1);
+  assert.deepEqual(state.requests.at(-1).body.moves, []);
+  assert.ok(state.requests.at(-1).body.dismissed.includes(origin));
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
 });

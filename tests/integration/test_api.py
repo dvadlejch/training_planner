@@ -70,6 +70,71 @@ def test_preview_is_not_persisted_and_acceptance_is_explicit(client):
     assert all(isinstance(item["id"], int) for item in response.json())
 
 
+def test_confirm_suggestion_saves_only_that_workout_as_confirmed(client):
+    """Direct confirmation validates a draft and saves only it as upcoming training."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    proposal = {key: value for key, value in preview[0].items() if key != "id"}
+    response = client.post(
+        "/api/proposals/accept",
+        json={**request, "proposals": [proposal], "confirm": True},
+    )
+    assert response.status_code == 201
+    saved = response.json()[0]
+    assert isinstance(saved["id"], int)
+    assert saved == {**proposal, "status": "confirmed", "id": saved["id"]}
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+    ).json() == [saved]
+    repeated = client.post(
+        "/api/proposals/accept",
+        json={**request, "proposals": [proposal], "confirm": True},
+    )
+    assert repeated.status_code == 409
+
+
+def test_confirm_suggestion_rejects_an_altered_draft(client):
+    """Confirmation cannot bypass preview revalidation by editing workout details."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    proposal = {key: value for key, value in preview[0].items() if key != "id"}
+    response = client.post(
+        "/api/proposals/accept",
+        json={
+            **request,
+            "proposals": [{**proposal, "notes": "Altered workout"}],
+            "confirm": True,
+        },
+    )
+    assert response.status_code == 409
+    assert (
+        client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        ).json()
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "reverse", [False, True], ids=["earliest-first", "latest-first"]
+)
+def test_suggestions_can_be_confirmed_individually(client, reverse):
+    """Confirm each original draft independently in either chronological order."""
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    proposals = [{k: v for k, v in item.items() if k != "id"} for item in preview]
+    saved = []
+    for proposal in reversed(proposals) if reverse else proposals:
+        response = client.post(
+            "/api/proposals/accept",
+            json={**request, "proposals": [proposal], "confirm": True},
+        )
+        assert response.status_code == 201, response.text
+        saved.extend(response.json())
+    assert len(saved) == len(preview)
+    assert all(item["status"] == "confirmed" for item in saved)
+
+
 def test_stale_batch_is_rejected_without_partial_acceptance(client):
     """An intervening booking prevents the whole outdated batch from being saved."""
     request = {"week_start": "2026-10-05", "blocked": []}
@@ -132,11 +197,11 @@ def test_invalid_session_input_is_rejected(client, payload):
     assert response.status_code == 422
 
 
-def test_invalid_week_and_reversed_range_are_rejected(client):
-    """Reject a non-Monday planning start and a reversed query interval."""
+def test_non_monday_start_is_allowed_and_reversed_range_is_rejected(client):
+    """Allow a rolling horizon on any weekday and reject reversed query intervals."""
     assert (
         client.post("/api/proposals", json={"week_start": "2026-10-06"}).status_code
-        == 422
+        == 200
     )
     assert (
         client.get(
@@ -144,6 +209,31 @@ def test_invalid_week_and_reversed_range_are_rejected(client):
         ).status_code
         == 422
     )
+
+
+def test_rolling_sunday_preview_can_be_confirmed(client, planning_clock):
+    """A Sunday start includes next week's gym dates and confirms the same preview."""
+    planning_clock["today"] = date(2026, 10, 18)
+    request = {
+        "week_start": "2026-10-18",
+        "blocked": ["2026-10-20", "2026-10-22"],
+    }
+    response = client.post("/api/proposals", json=request)
+    assert response.status_code == 200
+    preview = response.json()
+    assert {item["day"] for item in preview if item["activity"] == "gym"} == {
+        "2026-10-21",
+        "2026-10-23",
+    }
+    assert all("2026-10-18" <= item["day"] <= "2026-10-24" for item in preview)
+    draft = next(item for item in preview if item["day"] == "2026-10-21")
+    proposal = {key: value for key, value in draft.items() if key != "id"}
+    accepted = client.post(
+        "/api/proposals/accept",
+        json={**request, "proposals": [proposal], "confirm": True},
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert accepted.json()[0]["status"] == "confirmed"
 
 
 def test_fully_blocked_week_and_empty_acceptance_are_valid(client):
@@ -844,6 +934,39 @@ def test_moved_draft_is_reserved_without_saving_and_can_be_accepted(client):
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()[0] == {**moved, "id": accepted.json()[0]["id"]}
     assert isinstance(accepted.json()[0]["id"], int)
+
+
+def test_confirm_moved_draft_then_confirm_another_suggestion(client):
+    """Confirm a moved draft and another workout after releasing its draft reservation.
+
+    The accepted move becomes a saved booking. Subsequent confirmation omits that
+    move and keeps its original date dismissed, matching the calendar workflow.
+    """
+    request = {"week_start": "2026-10-05"}
+    preview = client.post("/api/proposals", json=request).json()
+    source = next(item for item in preview if item["day"] == "2026-10-06")
+    moved = {key: value for key, value in source.items() if key != "id"}
+    moved["day"] = "2026-10-08"
+    moves = [{"original_day": source["day"], "session": moved}]
+    recalculated = client.post("/api/proposals", json={**request, "moves": moves}).json()
+    confirmed = client.post(
+        "/api/proposals/accept",
+        json={**request, "moves": moves, "proposals": [moved], "confirm": True},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    other = next(item for item in recalculated if item["day"] != moved["day"])
+    proposal = {key: value for key, value in other.items() if key != "id"}
+    response = client.post(
+        "/api/proposals/accept",
+        json={
+            **request,
+            "dismissed": [source["day"]],
+            "proposals": [proposal],
+            "confirm": True,
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()[0]["status"] == "confirmed"
 
 
 def test_draft_move_can_be_accepted_without_recalculating(client):

@@ -7,12 +7,6 @@ import RescheduleDialog from "./components/RescheduleDialog";
 import SessionForm from "./components/SessionForm";
 import { addDays, localDate, monthRange, shiftMonth } from "./calendar";
 
-function initialMonday(): string {
-  const today = new Date();
-  today.setDate(today.getDate() - (today.getDay() + 6) % 7);
-  return localDate(today);
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The operation could not be completed.";
 }
@@ -33,24 +27,20 @@ export default function App(): ReactElement {
   const range = monthRange(month);
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
     .format(new Date(`${month}-01T12:00:00`));
-  const [week, setWeek] = useState(initialMonday);
   const [weeks, setWeeks] = useState(1);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [preview, setPreview] = useState<{
     input: PlanningRequest;
     sessions: Session[];
-    selectedDays: string[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const validWeek = Boolean(week) && new Date(`${week}T12:00:00`).getDay() === 1;
   const editing = editor !== null || proposalEditor !== null;
   const interactionBlocked = busy || reschedule !== null;
-  const selectedCount = preview?.selectedDays.length ?? 0;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -117,7 +107,7 @@ export default function App(): ReactElement {
   }
 
   function askToReschedule(input = preview?.input ?? {
-    week_start: validWeek ? week : initialMonday(), weeks, blocked: [...blocked],
+    week_start: localDate(new Date()), weeks, blocked: [...blocked],
   }): void {
     setReschedule(input);
   }
@@ -142,7 +132,6 @@ export default function App(): ReactElement {
     setPreview({
       input: nextInput,
       sessions: preview.sessions.map((item) => item === session ? { ...item, day } : item),
-      selectedDays: preview.selectedDays.map((selected) => selected === session.day ? day : selected),
     });
     setProposalEditor(null);
     setError("");
@@ -164,7 +153,6 @@ export default function App(): ReactElement {
     setPreview({
       input: nextInput,
       sessions: preview.sessions.filter((item) => item !== session),
-      selectedDays: preview.selectedDays.filter((day) => day !== session.day),
     });
     setError("");
     setNotice("Suggestion removed. Recalculation will keep its date free; generating a new plan resets removals.");
@@ -176,7 +164,7 @@ export default function App(): ReactElement {
     const input = reschedule;
     const success = await run(async () => {
       const proposed = await generateProposals(input);
-      setPreview({ input, sessions: proposed, selectedDays: [] });
+      setPreview({ input, sessions: proposed });
       setNotice("Suggestions recalculated around your changes. Review before accepting.");
     });
     if (success) setReschedule(null);
@@ -195,27 +183,36 @@ export default function App(): ReactElement {
   }
 
   async function generate(): Promise<void> {
-    if (interactionBlocked || editing || loading || !validWeek) return;
-    const input = { week_start: week, weeks, blocked: [...blocked] };
+    if (interactionBlocked || editing || loading) return;
+    const input = { week_start: localDate(new Date()), weeks, blocked: [...blocked] };
     await run(async () => {
       setPreview(null);
       const proposed = await generateProposals(input);
-      // Start unchecked so acceptance reflects an explicit user selection.
-      setPreview({ input, sessions: proposed, selectedDays: [] });
+      setPreview({ input, sessions: proposed });
+      setMonth(input.week_start.slice(0, 7));
     });
   }
 
-  async function accept(): Promise<void> {
-    if (interactionBlocked || editing || !preview) return;
-    const selected = preview.sessions.filter((session) =>
-      preview.selectedDays.includes(session.day));
-    if (selected.length === 0) return;
-
+  async function confirmProposal(session: Session): Promise<void> {
+    if (interactionBlocked || loading || editing || !preview) return;
+    if (!preview.sessions.includes(session)) return;
     await run(async () => {
-      await acceptProposals(preview.input, selected);
-      setPreview(null);
+      await acceptProposals(preview.input, [session], true);
+      // A persisted move is now a booking, so stop sending it as an unsaved move.
+      const move = preview.input.moves?.find((item) => item.session.day === session.day);
+      const remaining = preview.sessions.filter((item) => item !== session);
+      setPreview(remaining.length ? {
+        input: {
+          ...preview.input,
+          moves: (preview.input.moves ?? []).filter((item) => item !== move),
+          dismissed: [...new Set([
+            ...(preview.input.dismissed ?? []), ...(move ? [move.original_day] : []),
+          ])],
+        },
+        sessions: remaining,
+      } : null);
       setRevision((value) => value + 1);
-      setNotice(`${selected.length} suggestion(s) accepted.`);
+      setNotice(`Suggestion confirmed for ${session.day}.`);
     });
   }
 
@@ -258,9 +255,21 @@ export default function App(): ReactElement {
               <span><i className="legend-outdoor" />Outdoors</span><span><i className="legend-rest" />Rest</span>
             </div>
             <details className="calendar-help"><summary>Using your calendar</summary>
-              <p>Open a workout for details and actions. Drag its move handle to another day, or use Edit to change the date. Confirmed and completed moves require approval.</p>
+              <p>Open a workout for details and actions. Use Confirm on a suggestion to save it as confirmed upcoming training. Other suggestions remain unsaved. Drag a move handle to another day, or click it to change the date. Confirmed and completed moves require approval.</p>
             </details>
           </div>
+          {preview && (
+            <div className="calendar-suggestion-toolbar" role="group" aria-label="Suggestion actions">
+              {preview.sessions.length === 0 ? (
+                <p role="status">{preview.input.dismissed?.length ? "No suggestions remain. Generate a new plan to start again." : "No eligible dates under the current rules and availability."}</p>
+              ) : null}
+              <button className="secondary" disabled={interactionBlocked || editing}
+                onClick={() => {
+                  setPreview(null);
+                  setNotice("Remaining suggestions dismissed. No additional sessions were saved.");
+                }}>Dismiss all</button>
+            </div>
+          )}
           {loading && <p className="calendar-loading" role="status">Loading sessions...</p>}
           <div className="month-scroll" tabIndex={0} role="region" aria-label="Full month calendar" aria-busy={loading}>
             <div className="month-weekdays" aria-hidden="true">
@@ -276,6 +285,7 @@ export default function App(): ReactElement {
                 onMove={moveSession}
                 onMoveProposal={moveProposal}
                 onRemoveProposal={removeProposal}
+                onConfirmProposal={confirmProposal}
                 onEditProposal={(session) => { setProposalEditor(session); setError(""); }}
                 onAdd={(day) => { setEditor({ day, session: null }); setError(""); }}
                 onEdit={(session) => { setEditor({ day: session.day, session }); setError(""); }}
@@ -285,63 +295,15 @@ export default function App(): ReactElement {
                 disabled={interactionBlocked || loading}
                 proposals={preview?.sessions ?? []}
                 blocked={blocked}
-                selection={preview ? {
-                  selectedDays: preview.selectedDays,
-                  disabled: interactionBlocked,
-                  onChange: (day, selected) => {
-                    setPreview((current) => current ? {
-                      ...current,
-                      selectedDays: selected
-                        ? [...new Set([...current.selectedDays, day])]
-                        : current.selectedDays.filter((value) => value !== day),
-                    } : null);
-                  },
-                } : undefined}
+                onAvailabilityChange={(day, unavailable) => {
+                  if (interactionBlocked || loading || editing) return;
+                  setBlocked((values) => unavailable
+                    ? [...new Set([...values, day])]
+                    : values.filter((value) => value !== day));
+                  setPreview(null); setError(""); setNotice("");
+                }}
               />
           </div>
-
-          {preview && (
-            <div className="preview" aria-label="Suggestion review">
-              <div className="review-heading"><h3>Review your proposal</h3><span className="selection-count">{selectedCount} selected</span></div>
-
-              {preview.sessions.length === 0 ? (
-                <p>{preview.input.dismissed?.length ? "No suggestions remain. Generate a new plan to start again." : "No eligible dates under the current rules and availability."}</p>
-              ) : (
-                <>
-                  <p>
-                    Select suggestions in the calendar above, then accept them. Use the month arrows to review suggestions across months; your selections are kept.
-                    Unchecked suggestions remain unsaved.
-                  </p>
-
-                  <button
-                    className="secondary"
-                    disabled={interactionBlocked}
-                    onClick={() => setPreview((current) => current ? {
-                      ...current,
-                      selectedDays: current.sessions.map((session) => session.day),
-                    } : null)}
-                  >
-                    Select all
-                  </button>
-
-                  <button disabled={interactionBlocked || selectedCount === 0 || editing} onClick={accept}>
-                    Accept selected ({selectedCount})
-                  </button>
-                </>
-              )}
-
-              <button
-                className="secondary"
-                disabled={interactionBlocked}
-                onClick={() => {
-                  setPreview(null);
-                  setNotice("Preview dismissed. No suggestions were saved.");
-                }}
-              >
-                Dismiss all
-              </button>
-            </div>
-          )}
         </section>
         <aside className="planner-sidebar" aria-label="Training tools">
           {editor && <div className="month-editor"><SessionForm
@@ -369,35 +331,17 @@ export default function App(): ReactElement {
           <summary><span className="eyebrow">Your next chapter</span><h2 id="proposal-heading">Suggestions</h2></summary>
           <p className="muted">A little structure, on your terms. Choose your dates and make a plan that fits.</p>
           <div className="planning-controls">
-            <label>Week beginning (Monday)<input type="date" value={week} disabled={interactionBlocked || editing} required
-              onChange={(event) => {
-                const day = event.target.value;
-                setWeek(day);
-                if (day) setMonth(day.slice(0, 7));
-                setBlocked([]); setPreview(null); setError(""); setNotice("");
-              }} /></label>
             <label>Planning horizon<select value={weeks} disabled={interactionBlocked || editing} onChange={(event) => {
               const next = Number(event.target.value);
               setWeeks(next);
-              setBlocked((days) => days.filter((day) => day <= addDays(week, next * 7 - 1)));
               setPreview(null); setError(""); setNotice("");
             }}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>
               {count} {count === 1 ? "week" : "weeks"}
             </option>)}</select></label>
           </div>
-          {!validWeek && <p role="alert">Select a Monday to generate suggestions.</p>}
-          <p className="muted">Choose unavailable days across the entire horizon. They still count toward recovery; availability choices are temporary.</p>
-          <fieldset disabled={interactionBlocked || !validWeek}><legend>Unavailable days</legend>
-            <div className="days">{validWeek && Array.from({ length: weeks * 7 }, (_, index) => {
-              const day = addDays(week, index);
-              return <label className="check" key={day}><input type="checkbox" checked={blocked.includes(day)}
-                onChange={(event) => {
-                  setBlocked((values) => event.target.checked ? [...values, day] : values.filter((value) => value !== day));
-                  setPreview(null);
-                }} />{day}</label>;
-            })}</div>
-          </fieldset>
-          <button disabled={interactionBlocked || !validWeek || loading || editing} onClick={generate}>Generate suggestions</button>
+          <p className="muted">Suggestions start today and cover the next {weeks * 7} days, including today.</p>
+          <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Availability choices are temporary and last until you reload the page.</p>
+          <button disabled={interactionBlocked || loading || editing} onClick={generate}>Generate suggestions</button>
 
         </details>
         <details className="reference-panel">

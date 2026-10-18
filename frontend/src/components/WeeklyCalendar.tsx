@@ -2,14 +2,7 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import { statuses, type Session, type SessionInput } from "../api/types";
 import { activityLabel, zoneLabel } from "../running";
 
-/** Controlled selection for the planner's one-proposal-per-day preview. */
-interface CalendarSelection {
-    selectedDays: readonly string[];
-    disabled: boolean;
-    onChange: (day: string, selected: boolean) => void;
-}
-
-/** Calendar data and optional controls for selecting draft suggestions. */
+/** Calendar data and optional controls for confirming draft suggestions. */
 interface WeeklyCalendarProps {
     weekStart: string;
     /** A month switches to compact cards and complete month rows. */
@@ -18,7 +11,8 @@ interface WeeklyCalendarProps {
     sessions: readonly Session[];
     proposals?: readonly Session[];
     blocked?: readonly string[];
-    selection?: CalendarSelection;
+    onAvailabilityChange?: (day: string, unavailable: boolean) => void;
+    onConfirmProposal?: (session: Session) => void;
     onDelete?: (session: Session) => void;
     onStatusChange?: (session: Session, status: SessionInput["status"]) => void;
     onAdd?: (day: string) => void;
@@ -38,14 +32,12 @@ interface WeeklyCalendarProps {
  * ----------
  * props : WeeklyCalendarProps
  *     Valid Monday date in YYYY-MM-DD format, saved sessions, optional
- *     proposals, unavailable dates, and controlled proposal selection.
- *     Selection is keyed by date because the current planner generates
- *     at most one proposal per day.
+ *     proposals, unavailable dates, and direct proposal confirmation.
  *
  * Returns
  * -------
  * ReactElement
- *     Calendar with empty days and optional selection controls.
+ *     Calendar with empty days and optional confirmation controls.
  *
  * Raises
  * ------
@@ -59,7 +51,8 @@ export default function WeeklyCalendar({
     sessions,
     proposals = [],
     blocked = [],
-    selection,
+    onAvailabilityChange,
+    onConfirmProposal,
     onDelete,
     onStatusChange,
     onAdd,
@@ -173,7 +166,16 @@ export default function WeeklyCalendar({
                         </h3>
 
                         {isToday && <p className="calendar-day-label">Today</p>}
-                        {blocked.includes(day) && (
+                        {onAvailabilityChange ? (
+                            <label className="calendar-availability">
+                                <input type="checkbox"
+                                    aria-label={`Unavailable for suggestions on ${day}`}
+                                    checked={blocked.includes(day)}
+                                    disabled={disabled || editor !== undefined}
+                                    onChange={(event) => onAvailabilityChange(day, event.target.checked)} />
+                                Unavailable
+                            </label>
+                        ) : blocked.includes(day) && (
                             <p className="calendar-day-label">
                                 Unavailable for suggestions
                             </p>
@@ -309,22 +311,15 @@ export default function WeeklyCalendar({
                                             Delete
                                         </button>
                                     )}
-
-                                    {isProposal && selection && (
-                                        <label className="calendar-selection">
-                                            <input
-                                                type="checkbox"
-                                                aria-label={`Select ${day} ${activityLabel(session.activity)}`}
-                                                checked={selection.selectedDays.includes(day)}
-                                                disabled={selection.disabled}
-                                                onChange={(event) =>
-                                                    selection.onChange(day, event.target.checked)
-                                                }
-                                            />
-                                            Select
-                                        </label>
-                                    )}
                                 </details>
+                                {isProposal && onConfirmProposal && (
+                                    <button type="button" className="calendar-action"
+                                        aria-label={`Confirm suggestion ${day} ${activityLabel(session.activity)}`}
+                                        disabled={disabled || editor !== undefined}
+                                        onClick={() => onConfirmProposal(session)}>
+                                        Confirm
+                                    </button>
+                                )}
                                 {isProposal && onRemoveProposal && (
                                     <button type="button" className="calendar-action secondary"
                                         aria-label={`Remove suggestion ${day} ${activityLabel(session.activity)}`}

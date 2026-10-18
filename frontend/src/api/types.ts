@@ -26,6 +26,7 @@ export interface ProposalMove {
 }
 
 export interface PlanningRequest {
+  /** Inclusive start of the rolling horizon; new plans use today's local date. */
   week_start: string;
   weeks: number;
   blocked: string[];
