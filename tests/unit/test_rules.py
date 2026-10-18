@@ -303,3 +303,57 @@ def test_custom_targets_preserve_remaining_drafts_after_each_confirmation(
             start, saved, blocked, not_before=start, targets=targets
         )
         assert regenerated == remaining
+
+
+def test_gym_prefers_empty_thursday_over_wednesday_run():
+    """Use an empty Thursday before pairing gym with Wednesday's proposed easy run."""
+    proposed = suggest_week(START, [], not_before=START)
+    first = [s for s in proposed if s.day < START + timedelta(days=7)]
+    gym_days = {s.day for s in first if s.activity == Activity.GYM}
+    run_days = {s.day for s in first if s.activity in RUN_ACTIVITIES}
+    assert gym_days == {START + timedelta(days=i) for i in (1, 3, 4)}
+    assert not gym_days & run_days
+
+
+@pytest.mark.parametrize("saved_first", [False, True])
+def test_three_consecutive_gym_days_are_allowed(saved_first):
+    """Use Tuesday through Thursday for gym when those are the only available days.
+
+    When Tuesday is already confirmed, it satisfies one target session and does
+    not prevent Wednesday and Thursday suggestions for the remaining sessions.
+    """
+    blocked = {START + timedelta(days=i) for i in range(28) if i % 7 not in (1, 2, 3)}
+    saved = (
+        [Session(START + timedelta(days=1), Activity.GYM, Status.CONFIRMED)]
+        if saved_first
+        else []
+    )
+    proposed = suggest_week(
+        START, saved, blocked, not_before=START, targets=TrainingTargets(gym=3, runs=0)
+    )
+    for week in range(4):
+        first = START + timedelta(days=7 * week)
+        gym_days = {
+            s.day
+            for s in proposed + saved
+            if first <= s.day < first + timedelta(days=7) and s.activity == Activity.GYM
+        }
+        assert gym_days == {first + timedelta(days=i) for i in (1, 2, 3)}
+
+
+@pytest.mark.parametrize("status", [Status.CONFIRMED, Status.COMPLETED, Status.SKIPPED])
+def test_gym_empty_day_preference_accounts_for_saved_run_status(status):
+    """Active saved runs favor another gym day while skipped runs leave the day free."""
+    saved = [
+        Session(START + timedelta(days=2), Activity.EASY_RUN, status, duration_min=30)
+    ]
+    proposed = suggest_week(
+        START, saved, not_before=START, targets=TrainingTargets(gym=3, runs=0)
+    )
+    gym_days = {
+        s.day
+        for s in proposed
+        if s.day < START + timedelta(days=7) and s.activity == Activity.GYM
+    }
+    offsets = (1, 2, 4) if status == Status.SKIPPED else (0, 1, 4)
+    assert gym_days == {START + timedelta(days=i) for i in offsets}

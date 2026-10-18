@@ -186,7 +186,12 @@ def suggest_week(
                     notes="Easy Z2 conversational running toward your weekly target.",
                 )
             )
-        for day in ranked_days(start, (1, 2, 4, 0, 3, 6, 5)):
+        # Prefer separate training days over familiar gym weekdays. Consecutive
+        # gym days are allowed; pair with an easy run only after trying empty days.
+        gym_days = ranked_days(start, (1, 2, 4, 0, 3, 6, 5))
+        occupied_days = {s.day for s in load()}
+        gym_days.sort(key=lambda day: day in occupied_days)
+        for day in gym_days:
             if count(start, {Activity.GYM}) >= targets.gym:
                 break
             add(

@@ -257,6 +257,9 @@ Saturday hike suggestions remain.
 The calendar, storage and manual add/edit workflow support multiple workouts per
 date without exact times. Automatic generation permits at most two events per day,
 pairing an easy/recovery run with ordinary gym training where recovery allows.
+Gym placement tries empty days before pairing with a run, even when that means
+using a less-preferred weekday. Consecutive gym days, including three in a row,
+are allowed; there is no mandatory gym rest-day gap.
 It does not automatically pair two runs, demanding activities, or training with
 an explicit rest booking. Manual entries may still exceed these automatic limits.
 No database migration is needed: multiple saved entries per date were already supported.

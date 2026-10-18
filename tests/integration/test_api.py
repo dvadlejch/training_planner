@@ -1250,3 +1250,57 @@ def test_excluding_one_same_day_draft_preserves_the_other(client):
         "/api/proposals/accept", json={**request, "proposals": [proposal]}
     )
     assert accepted.status_code == 201, accepted.text
+
+
+def test_midnight_cannot_mix_original_and_replacement_gym_layouts(
+    client, planning_clock
+):
+    """Reject a mixed batch that would exceed the gym quota across two valid layouts.
+
+    After Monday elapses, a replacement run takes Tuesday and gym moves to Sunday.
+    Tuesday gym from the original preview remains individually confirmable, but
+    combining both layouts must not allow four gym sessions in the same period.
+    """
+    request = {"week_start": "2026-10-05"}
+    original = client.post("/api/proposals", json=request).json()
+    planning_clock["today"] = date(2026, 10, 6)
+    current = client.post("/api/proposals", json=request).json()
+    original_gym = [
+        s for s in original if s["activity"] == "gym" and s["day"] < "2026-10-12"
+    ]
+    extra = next(s for s in current if s["activity"] == "gym" and s not in original)
+    assert extra["day"] == "2026-10-11"
+    selected = [
+        {k: v for k, v in s.items() if k != "id"} for s in original_gym + [extra]
+    ]
+    response = client.post(
+        "/api/proposals/accept", json={**request, "proposals": selected}
+    )
+    assert response.status_code == 409
+    assert (
+        client.get(
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
+        ).json()
+        == []
+    )
+
+
+def test_original_layout_still_rechecks_bookings_after_midnight(client, planning_clock):
+    """Original-date validation cannot confirm gym over an intervening rest booking."""
+    request = {"week_start": "2026-10-05"}
+    original = client.post("/api/proposals", json=request).json()
+    gym = next(
+        s for s in original if s["day"] == "2026-10-06" and s["activity"] == "gym"
+    )
+    proposal = {k: v for k, v in gym.items() if k != "id"}
+    planning_clock["today"] = date(2026, 10, 6)
+    booking = client.post(
+        "/api/sessions", json={"day": "2026-10-06", "activity": "rest"}
+    ).json()
+    response = client.post(
+        "/api/proposals/accept", json={**request, "proposals": [proposal]}
+    )
+    assert response.status_code == 409
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
+    ).json() == [booking]

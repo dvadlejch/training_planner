@@ -355,9 +355,29 @@ def accept_proposals(
                 "Duplicate proposed workouts; generate suggestions again"
             )
         if any(session not in available for session in proposals):
-            raise ProposalConflict(
-                "The calendar or proposals changed; generate suggestions again"
+            # After midnight, replacement runs can occupy dates that were empty
+            # in the preview and change the gym ranking. Also allow the complete
+            # selection from the original-date layout, rechecked against current
+            # bookings. Never combine drafts from the two different layouts.
+            original_layout = (
+                _suggest_with_moves(
+                    week_start,
+                    existing,
+                    blocked,
+                    weeks,
+                    week_start,
+                    moves or [],
+                    dismissed or set(),
+                    targets,
+                    excluded or set(),
+                )
+                if not_before > week_start
+                else []
             )
+            if any(session not in original_layout for session in proposals):
+                raise ProposalConflict(
+                    "The calendar or proposals changed; generate suggestions again"
+                )
         return [
             save_session(
                 conn, replace(session, status=Status.CONFIRMED) if confirm else session
