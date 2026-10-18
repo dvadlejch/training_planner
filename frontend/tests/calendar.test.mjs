@@ -344,7 +344,7 @@ test("month is the primary view and horizon changes do not truncate it", async (
   assert.equal(dates.filter((day) => day.startsWith(month)).length, days);
   assert.equal(dates.length % 7, 0);
   assert.deepEqual(state.reads.at(-1), { start: dates[0], end: dates.at(-1) });
-  assert.equal(document.querySelector("main > section"), calendar.closest("section"));
+  assert.ok(document.querySelector("main > .planner-layout > section") === calendar.closest("section"));
   for (const horizon of ["4", "1"]) {
     await change(document.querySelector(".planning-controls select"), horizon);
     assert.deepEqual([...calendar.querySelectorAll("time")].map((item) => item.dateTime), dates);
@@ -839,4 +839,32 @@ test("retry rescheduling after removal without restoring the dismissed suggestio
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
   assert.deepEqual(state.requests.at(-1).body.dismissed, [firstDay]);
   assert.deepEqual(state.sessions, [saved]);
+});
+
+// The header action must reveal and focus planning controls without requesting a plan.
+test("Plan training opens the tools panel without generating suggestions", async (t) => {
+  const state = await setup(t);
+  const panel = document.querySelector(".planning-panel");
+  panel.open = false;
+  const action = document.querySelector(".plan-button");
+  await click(action);
+  assert.equal(panel.open, true);
+  assert.equal(document.activeElement, panel.querySelector("summary"));
+  assert.deepEqual(state.requests, []);
+});
+
+// Hiding planning options must preserve draft selection and nearby acceptance controls.
+test("suggestion review stays usable when the planning panel is collapsed", async (t) => {
+  const state = await setup(t, []);
+  await click(button("Generate suggestions"));
+  await click(button("Select all"));
+  const panel = document.querySelector(".planning-panel");
+  panel.open = false;
+  const review = document.querySelector('[aria-label="Suggestion review"]');
+  assert.ok(review.closest(".calendar-section"));
+  assert.equal(review.closest("details"), null);
+  assert.equal(review.querySelector(".selection-count").textContent, "1 selected");
+  await click(button("Accept selected (1)"));
+  assert.equal(state.requests.at(-1).path, "/api/proposals/accept");
+  assert.equal(state.requests.at(-1).body.proposals.length, 1);
 });

@@ -11,7 +11,7 @@ interface SessionFormProps {
   onCancel: () => void;
 }
 
-/** Inline calendar editor; persisted values are preserved until explicitly changed. */
+/** Calendar tools-panel editor; persisted values are preserved until explicitly changed. */
 export default function SessionForm({
   day, session, disabled, error, onSave, onCancel,
 }: SessionFormProps): ReactElement {

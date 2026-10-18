@@ -140,7 +140,7 @@ export default function WeeklyCalendar({
                 return (
                     <li
                         key={day}
-                        className={`calendar-day${isToday ? " calendar-day--today" : ""}${editor?.day === day && !month ? " calendar-day--editing" : ""}${month && !day.startsWith(month) ? " calendar-day--outside" : ""}${canMove && dropDay === day ? " calendar-day--drop-target" : ""}`}
+                        className={`calendar-day${editor?.day === day ? " calendar-day--selected" : ""}${isToday ? " calendar-day--today" : ""}${editor?.day === day && !month ? " calendar-day--editing" : ""}${month && !day.startsWith(month) ? " calendar-day--outside" : ""}${canMove && dropDay === day ? " calendar-day--drop-target" : ""}`}
                         onDragOver={(event) => {
                             if (!draggedSession(day)) return;
                             event.preventDefault();
@@ -163,7 +163,10 @@ export default function WeeklyCalendar({
                     >
                         <h3 className="calendar-day-heading">
                             <time dateTime={day} aria-current={isToday ? "date" : undefined}>
-                                {month ? date.getDate() : weekdayFormat.format(date)}
+                                {month ? <>
+                                    <span className="calendar-date-number">{date.getDate()}</span>
+                                    <span className="calendar-mobile-date">{weekdayFormat.format(date)} &middot; {dateFormat.format(date)}</span>
+                                </> : weekdayFormat.format(date)}
                                 {!month && <small>{dateFormat.format(date)}</small>}
                                 {month && <span className="sr-only"> {dateFormat.format(date)}</span>}
                             </time>
@@ -187,7 +190,7 @@ export default function WeeklyCalendar({
                         {!month && editor?.day === day && editor.content}
 
                         {items.length === 0 && (
-                            <p className="calendar-empty">No sessions</p>
+                            <p className="calendar-empty">Open day</p>
                         )}
 
                         {items.map(({ session, isProposal }, index) => (
@@ -198,7 +201,7 @@ export default function WeeklyCalendar({
                                         : `session-${session.id ?? `${day}-${index}`}`
                                 }
                                 className={
-                                    "calendar-card " +
+                                    `calendar-card calendar-card--activity-${session.activity} ` +
                                     (isProposal
                                         ? "calendar-card--proposal"
                                         : `calendar-card--${session.status}`)
@@ -231,8 +234,13 @@ export default function WeeklyCalendar({
                                     <summary>
                                         <h4>{activityLabel(session.activity)}</h4>
                                         <span className="calendar-card-overview">
+                                            {session.duration_min !== null && `${session.duration_min} min`}
+                                            {session.duration_min !== null && session.hr_zone_min !== null && " \u00b7 "}
+                                            {session.hr_zone_min !== null && (session.hr_zone_min === session.hr_zone_max
+                                                ? `Z${session.hr_zone_min}` : `Z${session.hr_zone_min}-${session.hr_zone_max}`)}
+                                        </span>
+                                        <span className={`status-badge status-badge--${isProposal ? "proposal" : session.status}`}>
                                             {isProposal ? "Suggestion" : session.status}
-                                            {session.duration_min !== null && ` / ${session.duration_min} min`}
                                         </span>
                                     </summary>
                                     <p className="calendar-card-status">
