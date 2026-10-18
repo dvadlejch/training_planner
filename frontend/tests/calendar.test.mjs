@@ -469,7 +469,7 @@ function availability(day) {
 // Calendar availability excludes suggestions without changing saved training.
 test("toggle unavailable days in the calendar and regenerate suggestions", async (t) => {
   const state = await setup(t);
-  assert.equal(document.querySelector(".planning-panel input[type=checkbox]"), null);
+  assert.equal(document.querySelector('.planning-panel input[aria-label^="Unavailable for suggestions"]'), null);
   await click(button("Generate suggestions"));
   assert.ok(document.querySelector(".calendar-card--proposal"));
   assert.ok(availability(firstDay).closest(".calendar-day"));
@@ -1140,4 +1140,56 @@ test("same-day draft actions preserve separate workout identities", async (t) =>
   assert.deepEqual(state.requests.at(-1).body.excluded, [
     { day: target, activity: "easy_run" }, { day: origin, activity: "easy_run" },
   ]);
+});
+
+
+// Gym and running weekday settings are independent and included in preview confirmation.
+test("allowed weekday controls include weekends and follow the preview", async (t) => {
+  const state = await setup(t, []);
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  for (const activity of ["Gym", "Running"]) {
+    for (const day of days) {
+      assert.equal(document.querySelector('[aria-label="' + activity + " on " + day + '"]').checked, true);
+    }
+  }
+  for (const day of days.slice(0, 5)) {
+    await click(document.querySelector('[aria-label="Gym on ' + day + '"]'));
+  }
+  await click(document.querySelector('[aria-label="Running on Tue"]'));
+  await click(button("Generate suggestions"));
+  const expected = { gym: [5, 6], running: [0, 2, 3, 4, 5, 6] };
+  assert.deepEqual(state.requests.at(-1).body.weekdays, expected);
+  await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
+  assert.deepEqual(state.requests.at(-1).body.weekdays, expected);
+});
+
+// Clearing all days is a valid restriction and changing a setting clears only the preview.
+test("weekday changes clear unsaved previews without modifying saved workouts", async (t) => {
+  const state = await setup(t);
+  await click(button("Generate suggestions"));
+  await click(document.querySelector('[aria-label="Gym on Mon"]'));
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.deepEqual(state.sessions, [saved]);
+  for (const day of ["Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) {
+    await click(document.querySelector('[aria-label="Gym on ' + day + '"]'));
+  }
+  assert.match(document.body.textContent, /No gym suggestions while no weekdays are selected/);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.weekdays.gym, []);
+});
+
+// Date editing cannot place an unsaved workout outside its recurring activity availability.
+test("draft date edits reject unselected weekdays", async (t) => {
+  const { state, origin, target } = await prepareDraft(t);
+  // target is Tuesday; the original draft is Monday.
+  await click(document.querySelector('[aria-label="Gym on Tue"]'));
+  await click(button("Generate suggestions"));
+  while (!dayCell(origin)) await click(document.querySelector('[aria-label="Next month"]'));
+  await click(moveHandle());
+  await change(form().elements.day, target);
+  await submit();
+  assert.match(document.querySelector('[role="alert"]').textContent, /allowed weekday/);
+  assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
+  assert.equal(document.querySelector("dialog"), null);
+  assert.deepEqual(state.sessions, []);
 });

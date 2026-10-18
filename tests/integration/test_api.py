@@ -1304,3 +1304,84 @@ def test_original_layout_still_rechecks_bookings_after_midnight(client, planning
     assert client.get(
         "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [booking]
+
+
+@pytest.mark.parametrize(
+    "weekdays",
+    [
+        {"gym": [-1]},
+        {"gym": [7]},
+        {"running": [1.5]},
+        {"running": [True]},
+        {"gym": ["2"]},
+        {"running": None},
+        {"unexpected": [0]},
+        {"gym": 2},
+    ],
+)
+def test_invalid_weekday_settings_rejected_at_both_endpoints(client, weekdays):
+    """Generation and acceptance validate recurring weekdays before accessing storage."""
+    request = {"week_start": "2026-10-05", "weekdays": weekdays}
+    assert client.post("/api/proposals", json=request).status_code == 422
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": []}
+        ).status_code
+        == 422
+    )
+
+
+def test_weekday_restrictions_round_trip_through_acceptance(client):
+    """A Sunday-only gym plan remains valid when the same settings are confirmed."""
+    request = {
+        "week_start": "2026-10-05",
+        "targets": {"gym": 1, "runs": 0},
+        "weekdays": {"gym": [6], "running": []},
+    }
+    response = client.post("/api/proposals", json=request)
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    gym = [s for s in preview if s["activity"] == "gym"]
+    assert len(gym) == 4
+    assert all(date.fromisoformat(s["day"]).weekday() == 6 for s in gym)
+    proposals = [{k: v for k, v in s.items() if k != "id"} for s in preview]
+    accepted = client.post(
+        "/api/proposals/accept",
+        json={**request, "proposals": proposals, "confirm": True},
+    )
+    assert accepted.status_code == 201, accepted.text
+    assert all(s["status"] == "confirmed" for s in accepted.json())
+
+
+def test_draft_move_cannot_bypass_allowed_weekdays(client):
+    """Explicit unsaved gym moves must stay on allowed weekdays at both endpoints."""
+    moved = {"day": "2026-10-06", "activity": "gym"}
+    request = {
+        "week_start": "2026-10-05",
+        "weekdays": {"gym": [6]},
+        "moves": [{"original_day": "2026-10-11", "session": moved}],
+    }
+    assert client.post("/api/proposals", json=request).status_code == 409
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": [moved]}
+        ).status_code
+        == 409
+    )
+
+
+def test_changed_weekdays_reject_an_ineligible_preview(client):
+    """Acceptance rechecks the supplied weekday constraints against selected drafts."""
+    request = {"week_start": "2026-10-05", "weekdays": {"gym": [6]}}
+    preview = client.post("/api/proposals", json=request).json()
+    sunday = next(s for s in preview if s["activity"] == "gym")
+    proposal = {k: v for k, v in sunday.items() if k != "id"}
+    response = client.post(
+        "/api/proposals/accept",
+        json={
+            **request,
+            "weekdays": {"gym": [0]},
+            "proposals": [proposal],
+        },
+    )
+    assert response.status_code == 409

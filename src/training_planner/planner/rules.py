@@ -2,7 +2,13 @@
 
 from datetime import date, timedelta
 
-from training_planner.domain.models import Activity, Session, Status, TrainingTargets
+from training_planner.domain.models import (
+    Activity,
+    ActivityWeekdays,
+    Session,
+    Status,
+    TrainingTargets,
+)
 from training_planner.domain.running import recovery_days, workload_duration
 
 
@@ -45,6 +51,7 @@ def suggest_week(
     *,
     not_before: date,
     targets: TrainingTargets = TrainingTargets(),
+    weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
     """Fill soft targets over four seven-day periods without changing saved work.
@@ -54,7 +61,8 @@ def suggest_week(
     Targets include planned, confirmed and completed sessions. Skipped work does
     not occupy capacity or satisfy targets. Automatic pairing is limited to an
     ordinary gym session and an easy/recovery run, with at most two items a day.
-    Manual entries and explicit draft moves remain under the user's control.
+    Recurring allowed weekdays restrict new gym/running suggestions; saved work
+    outside those days is preserved and still counts toward the targets.
     """
     end = week_start + timedelta(days=PLANNING_DAYS - 1)
     blocked = blocked or set()
@@ -80,6 +88,7 @@ def suggest_week(
         if (
             not max(week_start, not_before) <= day <= end
             or day in blocked
+            or not weekdays.allows(day, session.activity)
             or (day, session.activity) in excluded
         ):
             return False

@@ -218,7 +218,8 @@ The starter currently provides:
 - The **calm outdoor interface** uses warm neutral surfaces, forest-green controls, activity colour accents and separate labelled status badges. Suggestion generation and the expandable heart-rate reference live in the tools panel; **Plan training** opens and focuses the suggestion controls. Suggestions are confirmed directly on their calendar cards. No remote fonts or assets are required.
 - **Mouse drag-and-drop** moves saved workouts and unsaved suggestions. Moving a confirmed or completed workout requires confirmation, including date changes through Edit; planned/skipped workouts and suggestions move without approval. After each successful move, a separate **Recalculate / Keep current suggestions** dialog asks whether to regenerate the preview. Cancelling a move or a failed save leaves both the workout and preview intact. Keeping suggestions preserves their positions; confirmation still rechecks the current calendar. Recalculation keeps manually moved draft dates while generating other suggestions around their workload. A recalculation failure leaves the completed move and preview intact for retry. Drafts remain unsaved until their **Confirm** button is pressed.
 - Each unsaved suggestion has **Confirm** and **Remove** buttons visible even while collapsed. Removal requires no confirmation and leaves saved workouts untouched. After removal, the **Recalculate / Keep current suggestions** dialog offers to update the remaining preview. Recalculation excludes the removed workout type on its date, preserves other same-day activities and discards any removed draft move; a fresh **Generate suggestions** resets removals. An explicit draft move may still use a dismissed date. Proposal generation and acceptance carry per-workout exclusions in optional `excluded: [{ "day": "2026-10-06", "activity": "gym" }]`. The legacy `dismissed` date list remains available to API clients for whole-day exclusions.
-- Drag the move handle, or click it to edit the date with the keyboard. Saved workouts may move to occupied or shaded adjacent-month dates. Suggestions may move to a date containing a different workout type, provided the date is available, inside the 28-day horizon and today or later. A second draft or active saved workout of the same type on that date is rejected. Moves preserve workout details and the displayed month. Dragging is disabled during loading, saving, editing and the rescheduling dialog. Touch dragging, dragging through month navigation and timed placement are not implemented.
+- Drag the move handle, or click it to edit the date with the keyboard. Saved workouts may move to occupied or shaded adjacent-month dates. Suggestions may move to a date containing a different workout type, provided the date is available, on an allowed weekday for that activity,
+inside the 28-day horizon and today or later. A second draft or active saved workout of the same type on that date is rejected. Moves preserve workout details and the displayed month. Dragging is disabled during loading, saving, editing and the rescheduling dialog. Touch dragging, dragging through month navigation and timed placement are not implemented.
 - Proposal requests support optional `moves: [{ "original_day": "2026-10-06", "session": { "day": "2026-10-08", "activity": "gym", "status": "planned" } }]`. These are explicit user-positioned drafts: generation reserves their workout type at the destination and excludes that type at the original date. Other activities may use either date. They may override preferred weekdays and recovery spacing, as manual training entries can; newly generated workouts account for their workload. Send the same `moves` with acceptance. The server rechecks dates, availability, duplicate (date, activity) origins/destinations, planned status and intervening bookings, and accepts selected drafts atomically. A fresh **Generate suggestions** starts a new plan without retaining manual draft moves.
 - A **Status** dropdown on every saved activity changes planned/confirmed/completed/skipped directly in the calendar. **Confirm** on a planned activity marks it committed but still upcoming. Status changes preserve other workout details and clear the suggestion preview only on success. Confirmed entries remain editable and count as booked training during suggestion generation. `PATCH /api/sessions/{session_id}/status` accepts only `{ "status": "confirmed" }` (or another supported status).
 - A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
@@ -236,17 +237,27 @@ The starter currently provides:
 **Not yet implemented:** the daypart calendar, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
 
 
-### Simple training targets and multiple daily events
+### Training targets, allowed weekdays and multiple daily events
 
 The Suggestions panel offers **gym sessions per week (0-7)**, **runs per week
 (0-7)**, and **interval runs (0-2, included in total runs)**. Defaults are three gym
 sessions, two runs and no intervals. Lowering total runs automatically lowers the
-interval selection if needed. Targets and availability are temporary page state
-and reset on reload; changing either clears the unsaved preview.
+interval selection if needed. **Gym weekdays** and **Running weekdays** select which
+days can receive each activity. All seven days, including Saturday and Sunday,
+are enabled by default. These are hard placement restrictions, while counts remain
+soft targets. No selected weekdays means no suggestions for that activity; the
+target count is retained so days can be enabled again later. All run categories
+use the running weekdays, including interval and fallback long-run suggestions.
+
+Targets, weekday choices and unavailable days are temporary page state and reset
+on reload. Changing any setting clears the unsaved preview. Confirmations and
+recalculations reuse the preview's original counts and weekday selections.
 
 For this first version, "per week" means each of four consecutive seven-day periods
 starting on the preview's start date, rather than partial Monday-Sunday weeks.
-Targets are soft: availability, existing bookings and recovery can leave them unmet.
+Targets are soft: allowed weekdays, unavailable dates, existing bookings and
+recovery can leave them unmet. A blocked date takes precedence over a selected
+weekday. Saved workouts on unselected weekdays are preserved and still count.
 Planned, confirmed and completed workouts count; skipped workouts do not count or
 occupy suggestion capacity. All running categories, including races, count toward
 total runs; only interval runs satisfy the interval target. Other proposed runs
@@ -274,10 +285,19 @@ API generation and acceptance both accept the same optional input:
 {
   "week_start": "2026-10-18",
   "targets": { "gym": 3, "runs": 3, "intervals": 1 },
+  "weekdays": { "gym": [0, 1, 2, 3, 4, 5, 6], "running": [0, 3, 5] },
   "blocked": [],
   "excluded": []
 }
 ```
+
+The optional API weekday settings use Monday = 0 through Sunday = 6.
+Omitting either activity defaults it to all seven days; an empty list allows none.
+Both generation and acceptance validate strict integer values from 0 to 6.
+Explicit unsaved draft moves must also respect the activity's selected weekdays;
+manual saved-workout entry remains under the user's control.
+Saturday hike suggestions remain independent and may occupy a selected gym day;
+their count and recurring weekdays are not configurable yet.
 
 Named running modes, personalized progression, cross-period gym carryover,
 gym workout rotation, persisted preferences and exact-time/daypart conflicts

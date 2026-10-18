@@ -943,3 +943,27 @@ th {
 .session-details dd { margin: 0 0 6px; font-weight: 600; overflow-wrap: anywhere; }
 .calendar-card-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 .calendar-editor label[hidden] { display: none; }
+
+.activity-weekdays {
+    margin: 0;
+}
+.activity-weekdays legend {
+    margin: 0 0 10px;
+}
+.weekday-options {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+}
+.weekday-options label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-size: .72rem;
+    cursor: pointer;
+}
+.weekday-options input {
+    width: auto;
+    margin: 0;
+}

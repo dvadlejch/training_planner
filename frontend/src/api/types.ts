@@ -42,11 +42,18 @@ export interface ProposalKey {
   activity: SessionInput["activity"];
 }
 
+export interface ActivityWeekdays {
+  /** Monday = 0, Sunday = 6. Empty arrays disable that activity's suggestions. */
+  gym: number[];
+  running: number[];
+}
+
 export interface PlanningRequest {
   /** Inclusive start of the rolling horizon; new plans use today's local date. */
   week_start: string;
   weeks: 4;
   targets: TrainingTargets;
+  weekdays: ActivityWeekdays;
   excluded?: ProposalKey[];
   blocked: string[];
   moves?: ProposalMove[];

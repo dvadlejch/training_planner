@@ -8,6 +8,7 @@ from pathlib import Path
 
 from training_planner.domain.models import (
     Activity,
+    ActivityWeekdays,
     ProposalMove,
     Session,
     Status,
@@ -158,6 +159,7 @@ def _suggest_with_moves(
     moves: list[ProposalMove],
     dismissed: set[date],
     targets: TrainingTargets,
+    weekdays: ActivityWeekdays,
     excluded: set[tuple[date, Activity]],
 ) -> list[Session]:
     """Reserve explicit draft positions and plan around them without saving them.
@@ -166,7 +168,7 @@ def _suggest_with_moves(
     they may override preferred weekdays and recovery spacing. Other suggestions
     still account for their workload. Both original and destination dates must be
     inside the planning horizon. Destinations must be future and available; another
-    activity on the same date is allowed.
+    activity on the same date is allowed. Recurring allowed weekdays still apply.
     """
     end = week_start + timedelta(days=7 * weeks - 1)
     origins: set[tuple[date, Activity]] = set()
@@ -179,6 +181,7 @@ def _suggest_with_moves(
             or not week_start <= move.original_day <= end
             or not max(week_start, not_before) <= session.day <= end
             or session.day in blocked
+            or not weekdays.allows(session.day, session.activity)
             or (session.day, session.activity) in occupied
             or session.status != Status.PLANNED
             or session.id is not None
@@ -195,6 +198,7 @@ def _suggest_with_moves(
         blocked | dismissed,
         not_before=not_before,
         targets=targets,
+        weekdays=weekdays,
         excluded=origins | excluded,
     )
     return sorted(
@@ -210,6 +214,7 @@ def generate_proposals(
     moves: list[ProposalMove] | None = None,
     dismissed: set[date] | None = None,
     targets: TrainingTargets = TrainingTargets(),
+    weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
     """Generate a preview without saving any proposed workouts.
@@ -233,6 +238,8 @@ def generate_proposals(
 
     targets : TrainingTargets
         Soft counts per seven-day period; intervals are part of total runs.
+    weekdays : ActivityWeekdays
+        Recurring allowed weekdays used for generation and draft moves.
     excluded : set[tuple[date, Activity]] | None
         Individual workout exclusions, preserving other same-day activities.
 
@@ -264,6 +271,7 @@ def generate_proposals(
         moves or [],
         dismissed or set(),
         targets,
+        weekdays,
         excluded or set(),
     )
 
@@ -278,6 +286,7 @@ def accept_proposals(
     dismissed: set[date] | None = None,
     confirm: bool = False,
     targets: TrainingTargets = TrainingTargets(),
+    weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
@@ -304,6 +313,8 @@ def accept_proposals(
         Save validated suggestions as confirmed upcoming workouts when true.
     targets : TrainingTargets
         Same training targets used for the preview.
+    weekdays : ActivityWeekdays
+        Recurring allowed weekdays used for generation and draft moves.
     excluded : set[tuple[date, Activity]] | None
         Same per-workout exclusions used for the preview.
 
@@ -348,6 +359,7 @@ def accept_proposals(
             moves or [],
             dismissed or set(),
             targets,
+            weekdays,
             excluded or set(),
         )
         if len({(s.day, s.activity) for s in proposals}) != len(proposals):
@@ -369,6 +381,7 @@ def accept_proposals(
                     moves or [],
                     dismissed or set(),
                     targets,
+                    weekdays,
                     excluded or set(),
                 )
                 if not_before > week_start

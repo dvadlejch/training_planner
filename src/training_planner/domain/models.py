@@ -94,3 +94,27 @@ class TrainingTargets:
             raise ValueError("Gym and running targets must be between 0 and 7")
         if not 0 <= self.intervals <= min(2, self.runs):
             raise ValueError("Intervals must be between 0 and 2 and within total runs")
+
+
+@dataclass(frozen=True)
+class ActivityWeekdays:
+    """Allowed weekdays for new gym/running suggestions; Monday is zero."""
+
+    gym: frozenset[int] = frozenset(range(7))
+    running: frozenset[int] = frozenset(range(7))
+
+    def __post_init__(self) -> None:
+        """Reject weekday values outside the Monday-zero, Sunday-six convention."""
+        for days in (self.gym, self.running):
+            if not isinstance(days, frozenset) or any(
+                type(day) is not int or not 0 <= day <= 6 for day in days
+            ):
+                raise ValueError("Allowed weekdays must be a frozenset of integers 0-6")
+
+    def allows(self, day: date, activity: Activity) -> bool:
+        """Apply recurring restrictions to gym and every running workout category."""
+        if activity == Activity.GYM:
+            return day.weekday() in self.gym
+        if activity.value.endswith("_run") or activity == Activity.RACE:
+            return day.weekday() in self.running
+        return True

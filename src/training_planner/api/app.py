@@ -24,7 +24,12 @@ from training_planner.application.services import (
     remove_session,
     update_session,
 )
-from training_planner.domain.models import ProposalMove, Session, TrainingTargets
+from training_planner.domain.models import (
+    ActivityWeekdays,
+    ProposalMove,
+    Session,
+    TrainingTargets,
+)
 from training_planner.storage.db import DEFAULT_DB
 
 
@@ -194,6 +199,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             ],
             payload.dismissed,
             targets=TrainingTargets(**payload.targets.model_dump()),
+            weekdays=ActivityWeekdays(**payload.weekdays.model_dump()),
             excluded={(item.day, item.activity) for item in payload.excluded},
         )
 
@@ -237,6 +243,7 @@ def create_app(database_path: Path | None = None) -> FastAPI:
             payload.dismissed,
             confirm=payload.confirm,
             targets=TrainingTargets(**payload.targets.model_dump()),
+            weekdays=ActivityWeekdays(**payload.weekdays.model_dump()),
             excluded={(item.day, item.activity) for item in payload.excluded},
         )
 

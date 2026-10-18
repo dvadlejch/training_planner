@@ -1,7 +1,7 @@
 """Validated JSON contracts kept separate from the framework-free domain."""
 
 from datetime import date
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -71,6 +71,17 @@ class TrainingTargetsInput(BaseModel):
         return self
 
 
+Weekday = Annotated[int, Field(strict=True, ge=0, le=6)]
+
+
+class ActivityWeekdaysInput(BaseModel):
+    """Recurring allowed gym/running weekdays; an empty set disables suggestions."""
+
+    model_config = ConfigDict(extra="forbid")
+    gym: frozenset[Weekday] = frozenset(range(7))
+    running: frozenset[Weekday] = frozenset(range(7))
+
+
 class ProposalKeyInput(BaseModel):
     """Identify one automatic suggestion without excluding other same-day events."""
 
@@ -86,6 +97,7 @@ class PlanningRequest(BaseModel):
     week_start: date
     weeks: Literal[4] = 4
     targets: TrainingTargetsInput = Field(default_factory=TrainingTargetsInput)
+    weekdays: ActivityWeekdaysInput = Field(default_factory=ActivityWeekdaysInput)
     excluded: list[ProposalKeyInput] = Field(default_factory=list)
     blocked: set[date] = Field(default_factory=set)
     moves: list[ProposalMoveInput] = Field(default_factory=list)

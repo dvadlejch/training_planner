@@ -4,7 +4,13 @@ from datetime import date, timedelta
 
 import pytest
 
-from training_planner.domain.models import Activity, Session, Status, TrainingTargets
+from training_planner.domain.models import (
+    Activity,
+    ActivityWeekdays,
+    Session,
+    Status,
+    TrainingTargets,
+)
 from training_planner.planner.rules import (
     RUN_ACTIVITIES,
     recovery_conflict,
@@ -357,3 +363,125 @@ def test_gym_empty_day_preference_accounts_for_saved_run_status(status):
     }
     offsets = (1, 2, 4) if status == Status.SKIPPED else (0, 1, 4)
     assert gym_days == {START + timedelta(days=i) for i in offsets}
+
+
+def test_weekend_gym_days_can_fill_the_target():
+    """Saturday and Sunday can both receive gym suggestions when available.
+
+    Exclude the independent Saturday hike drafts so the weekend dates are free
+    for the explicitly requested two-session gym schedule.
+    """
+    weekdays = ActivityWeekdays(gym=frozenset({5, 6}), running=frozenset())
+    excluded = {(START + timedelta(days=i), Activity.HIKE) for i in range(5, 28, 7)}
+    proposed = suggest_week(
+        START,
+        [],
+        not_before=START,
+        targets=TrainingTargets(gym=2, runs=0),
+        weekdays=weekdays,
+        excluded=excluded,
+    )
+    assert len(proposed) == 8
+    assert all(
+        s.activity == Activity.GYM and s.day.weekday() in {5, 6} for s in proposed
+    )
+    assert {s.day for s in proposed} == {
+        START + timedelta(days=i) for i in range(28) if i % 7 in {5, 6}
+    }
+
+
+@pytest.mark.parametrize("offset", range(7))
+def test_all_running_suggestions_respect_selected_weekdays(offset):
+    """Easy, interval and fallback long-run placement all honor allowed weekdays."""
+    start = START + timedelta(days=offset)
+    weekdays = ActivityWeekdays(gym=frozenset({5, 6}), running=frozenset({0, 1, 3}))
+    blocked = {
+        start + timedelta(days=i)
+        for i in range(28)
+        if (start + timedelta(days=i)).weekday() == 5
+    }
+    proposed = suggest_week(
+        start,
+        [],
+        blocked,
+        not_before=start,
+        targets=TrainingTargets(gym=1, runs=3, intervals=1),
+        weekdays=weekdays,
+    )
+    runs = [s for s in proposed if s.activity in RUN_ACTIVITIES]
+    assert runs
+    assert any(s.activity == Activity.INTERVAL_RUN for s in runs)
+    assert all(s.day.weekday() in weekdays.running for s in runs)
+    assert all(
+        s.day.weekday() in weekdays.gym for s in proposed if s.activity == Activity.GYM
+    )
+
+
+def test_empty_weekdays_disable_only_the_selected_activities():
+    """No selected gym or running weekdays yields only the existing hike suggestions."""
+    proposed = suggest_week(
+        START,
+        [],
+        not_before=START,
+        weekdays=ActivityWeekdays(gym=frozenset(), running=frozenset()),
+    )
+    assert len(proposed) == 4
+    assert all(s.activity == Activity.HIKE for s in proposed)
+
+
+def test_saved_work_outside_allowed_weekdays_still_counts():
+    """A confirmed off-schedule workout is preserved and satisfies its target."""
+    saved = [Session(START, Activity.GYM, Status.CONFIRMED)]
+    proposed = suggest_week(
+        START,
+        saved,
+        not_before=START,
+        targets=TrainingTargets(gym=1, runs=0),
+        weekdays=ActivityWeekdays(gym=frozenset({6})),
+    )
+    assert not any(
+        s.activity == Activity.GYM and s.day < START + timedelta(days=7)
+        for s in proposed
+    )
+    assert all(s.day.weekday() == 6 for s in proposed if s.activity == Activity.GYM)
+    assert saved[0] == Session(START, Activity.GYM, Status.CONFIRMED)
+
+
+def test_blocked_dates_override_allowed_weekdays():
+    """A blocked Sunday never causes gym to spill onto an unselected weekday."""
+    blocked = {START + timedelta(days=i) for i in range(6, 28, 7)}
+    proposed = suggest_week(
+        START,
+        [],
+        blocked,
+        not_before=START,
+        targets=TrainingTargets(gym=3, runs=0),
+        weekdays=ActivityWeekdays(gym=frozenset({6})),
+    )
+    assert not any(s.activity == Activity.GYM for s in proposed)
+
+
+@pytest.mark.parametrize(
+    "days", [frozenset({-1}), frozenset({7}), frozenset({True}), frozenset({1.5})]
+)
+def test_invalid_domain_weekdays_are_rejected(days):
+    """Domain callers cannot provide weekdays outside the strict integer 0-6 range."""
+    with pytest.raises(ValueError, match="weekdays"):
+        ActivityWeekdays(gym=days)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_weekday_restricted_drafts_survive_individual_confirmation(reverse):
+    """Confirming a restricted plan preserves every remaining same-day/fallback draft."""
+    weekdays = ActivityWeekdays(
+        gym=frozenset({1, 2, 3, 6}), running=frozenset({0, 2, 4})
+    )
+    preview = suggest_week(START, [], not_before=START, weekdays=weekdays)
+    remaining = list(preview)
+    saved = []
+    for proposal in reversed(preview) if reverse else preview:
+        saved.append(proposal)
+        remaining.remove(proposal)
+        assert (
+            suggest_week(START, saved, not_before=START, weekdays=weekdays) == remaining
+        )

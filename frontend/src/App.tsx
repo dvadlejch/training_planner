@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession, updateSession, updateSessionStatus } from "./api/client";
-import { type PlanningRequest, type Session, type SessionInput, type TrainingTargets } from "./api/types";
+import { type PlanningRequest, type Session, type SessionInput, type TrainingTargets, type ActivityWeekdays } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
 import RescheduleDialog from "./components/RescheduleDialog";
@@ -9,6 +9,15 @@ import { addDays, localDate, monthRange, shiftMonth } from "./calendar";
 
 function sameWorkout(a: Pick<SessionInput, "day" | "activity">, b: Pick<SessionInput, "day" | "activity">): boolean {
   return a.day === b.day && a.activity === b.activity;
+}
+
+const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+function allowsWeekday(day: string, activity: SessionInput["activity"], weekdays: ActivityWeekdays): boolean {
+  const allowed = activity === "gym" ? weekdays.gym
+    : activity.endsWith("_run") || activity === "race" ? weekdays.running : null;
+  const weekday = (new Date(day + "T12:00:00").getDay() + 6) % 7;
+  return allowed === null || allowed.includes(weekday);
 }
 
 function errorMessage(error: unknown): string {
@@ -32,6 +41,9 @@ export default function App(): ReactElement {
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
     .format(new Date(`${month}-01T12:00:00`));
   const [targets, setTargets] = useState<TrainingTargets>({ gym: 3, runs: 2, intervals: 0 });
+  const [weekdays, setWeekdays] = useState<ActivityWeekdays>(() => ({
+    gym: [0, 1, 2, 3, 4, 5, 6], running: [0, 1, 2, 3, 4, 5, 6],
+  }));
   const [blocked, setBlocked] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [preview, setPreview] = useState<{
@@ -111,7 +123,7 @@ export default function App(): ReactElement {
   }
 
   function askToReschedule(input = preview?.input ?? {
-    week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, blocked: [...blocked],
+    week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked],
   }): void {
     setReschedule(input);
   }
@@ -122,9 +134,9 @@ export default function App(): ReactElement {
     const input = preview.input;
     const end = addDays(input.week_start, input.weeks * 7 - 1);
     if (day < input.week_start || day > end || day < localDate(new Date()) ||
-        input.blocked.includes(day) || sessions.some((item) => item.status !== "skipped" && sameWorkout(item, { ...session, day })) ||
+        input.blocked.includes(day) || !allowsWeekday(day, session.activity, input.weekdays) || sessions.some((item) => item.status !== "skipped" && sameWorkout(item, { ...session, day })) ||
         preview.sessions.some((item) => item !== session && sameWorkout(item, { ...session, day }))) {
-      setError("Choose an available date within the 28-day horizon without the same workout type, today or later.");
+      setError("Choose an available date within the 28-day horizon on an allowed weekday without the same workout type, today or later.");
       return;
     }
     const { id: _id, ...moved } = { ...session, day };
@@ -190,7 +202,7 @@ export default function App(): ReactElement {
 
   async function generate(): Promise<void> {
     if (interactionBlocked || editing || loading) return;
-    const input = { week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, blocked: [...blocked] };
+    const input = { week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked] };
     await run(async () => {
       setPreview(null);
       const proposed = await generateProposals(input);
@@ -358,10 +370,35 @@ export default function App(): ReactElement {
                 ))}
               </select></label>
             ))}
+            {([["gym", "Gym"], ["running", "Running"]] as const).map(([activity, label]) => (
+              <fieldset key={activity} className="activity-weekdays" disabled={interactionBlocked || editing}>
+                <legend>{label} weekdays</legend>
+                <div className="weekday-options">
+                  {weekdayLabels.map((day, index) => (
+                    <label key={day}>
+                      <input type="checkbox" aria-label={label + " on " + day}
+                        checked={weekdays[activity].includes(index)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setWeekdays((current) => ({
+                            ...current,
+                            [activity]: checked
+                              ? [...current[activity], index].sort((a, b) => a - b)
+                              : current[activity].filter((value) => value !== index),
+                          }));
+                          setPreview(null); setError(""); setNotice("");
+                        }} />
+                      {day}
+                    </label>
+                  ))}
+                </div>
+                {weekdays[activity].length === 0 && <p className="muted">No {label.toLowerCase()} suggestions while no weekdays are selected.</p>}
+              </fieldset>
+            ))}
           </div>
           <p className="muted">Suggestions start today and cover the next 28 days, including today.</p>
-          <p className="muted">Targets apply to each seven-day period starting today. Saved workouts count toward them. Availability and recovery may leave targets unmet. Other runs are easy or long easy runs. An easy run and gym session can share a day.</p>
-          <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Targets and availability choices last until you reload the page.</p>
+          <p className="muted">Only selected weekdays are used for new gym and running suggestions. Targets apply to each seven-day period starting today. Saved workouts count toward them. Availability and recovery may leave targets unmet. Other runs are easy or long easy runs. An easy run and gym session can share a day.</p>
+          <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Training settings and unavailable days last until you reload the page.</p>
           <button disabled={interactionBlocked || loading || editing} onClick={generate}>Generate suggestions</button>
 
         </details>
