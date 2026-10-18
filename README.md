@@ -83,7 +83,9 @@ A primary workflow is **one-click or quick completion** of an existing workout; 
 
 The UI should avoid requiring detailed metrics just to record that an activity happened. For some activities, only a date and category will be known. Store unknown values as missing/null; never infer that unentered workouts did not occur.
 
-Initially gym logging can track gym session type, duration, effort, status and notes. Exercises, sets, weights, and gym performance trends are future enhancements.
+Gym logging currently supports duration, effort, status, optional active calories,
+and multiline workout notes for exercises, weights and repetitions. Structured
+exercise/set records, gym session subtypes and performance trends remain planned.
 
 ## 6. Optional fitness and recovery information
 
@@ -221,7 +223,10 @@ The starter currently provides:
 - A **Status** dropdown on every saved activity changes planned/confirmed/completed/skipped directly in the calendar. **Confirm** on a planned activity marks it committed but still upcoming. Status changes preserve other workout details and clear the suggestion preview only on success. Confirmed entries remain editable and count as booked training during suggestion generation. `PATCH /api/sessions/{session_id}/status` accepts only `{ "status": "confirmed" }` (or another supported status).
 - A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
 - A **FastAPI** backend with validated session and planning endpoints, including `PUT /api/sessions/{session_id}` for replacing a saved activity while preserving its identifier (404 if missing).
-- SQLite storage using the current sessions schema, with **planned, confirmed, completed or skipped** status and optional duration, RPE and notes. Blank metrics remain null.
+- SQLite storage using the current sessions schema, with **planned, confirmed, completed or skipped** status. Planned duration and main-set HR zones are separate from recorded results; all metrics are optional and blank values remain null.
+- Activity-specific recorded results: running has distance (km), actual duration (min), average HR (bpm), calculated average pace (min/km), and active calories (kcal); cycling has distance, actual duration, average HR, elevation gain (m), and active calories; hiking has distance, actual duration, calculated average pace, elevation gain, and active calories. Gym has actual duration, active calories and multiline notes for weights and repetitions. Recorded RPE is optional for all activities. Average pace uses actual total duration divided by distance; it is not a separate editable value or moving pace. Zero or missing distance/time leaves pace unspecified.
+- Event cards show upcoming targets or a compact summary of completed results. Expanded details group training targets, recorded results, and notes. Completed sessions with a recorded duration use it for duration-based recovery checks; otherwise those checks fall back to planned duration. Distance, average HR, pace, elevation and calories are stored/displayed but do not yet influence recommendations.
+- Add/edit fields follow the selected status: **planned/confirmed** show targets and planning notes; **completed** shows activity-specific results, RPE and workout notes, with existing targets in a collapsed, read-only **Original plan** section; **skipped** shows only date, activity and status. Switching status preserves both saved values and unsaved drafts. Completing a workout does not require metrics. New activities saved directly as completed or skipped do not receive default planned targets; explicitly edited targets are retained. Changing activity while recording results does not overwrite the original targets.
 - An **ephemeral, whole-day** unavailability selector when generating suggestions (not persisted).
 - Explicit **Generate suggestions** and **Accept selected** actions with per-item selection. Generating a preview does not save proposed sessions; acceptance rechecks the calendar and commits the entire batch in one transaction.
 - Deterministic **1-4-week, day-level rules** for gym, easy runs, weekend hikes and flexible long-run dates.

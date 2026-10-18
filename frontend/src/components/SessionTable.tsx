@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import type { Session } from "../api/types";
 import { activityLabel, zoneLabel } from "../running";
+import SessionDetails from "./SessionDetails";
 
 /** Optional selection controls for the current whole-day proposal list. */
 interface SessionSelection {
@@ -41,10 +42,10 @@ export default function SessionTable({
           <th scope="col">Date</th>
           <th scope="col">Activity</th>
           <th scope="col">Status</th>
-          <th scope="col">Minutes</th>
+          <th scope="col">Planned minutes</th>
           <th scope="col">Target HR zone</th>
           <th scope="col">RPE</th>
-          <th scope="col">Notes</th>
+          <th scope="col">Results and notes</th>
         </tr></thead>
         <tbody>{sessions.map((session) => (
           <tr key={session.id ?? `${session.day}-${session.activity}`}>
@@ -60,7 +61,9 @@ export default function SessionTable({
             <td>{session.day}</td><td>{activityLabel(session.activity)}</td>
             <td>{session.status}</td><td>{session.duration_min ?? "—"}</td>
             <td>{zoneLabel(session.hr_zone_min, session.hr_zone_max)}</td>
-            <td>{session.effort ?? "—"}</td><td>{session.notes || "—"}</td>
+            <td>{session.effort ?? "—"}</td><td><SessionDetails session={{ ...session,
+              duration_min: null, hr_zone_min: null, hr_zone_max: null, effort: null,
+            }} /></td>
           </tr>
         ))}</tbody>
       </table>

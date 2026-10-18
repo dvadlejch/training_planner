@@ -15,6 +15,8 @@ const { deleteSession } = await import(sourceUrl("../src/api/client.ts"));
 const saved = {
   id: 7, day: "2026-10-06", activity: "gym", status: "planned",
   duration_min: null, effort: null, hr_zone_min: null, hr_zone_max: null, notes: "",
+  actual_duration_min: null, distance_km: null, average_hr_bpm: null,
+  elevation_gain_m: null, active_calories_kcal: null,
 };
 
 async function renderCalendar(t, props) {

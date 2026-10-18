@@ -23,6 +23,8 @@ const firstDay = dateString(monday);
 const saved = {
   id: 7, day: firstDay, activity: "gym", status: "completed", duration_min: null,
   effort: 8, hr_zone_min: null, hr_zone_max: null, notes: "Original workout",
+  actual_duration_min: null, distance_km: null, average_hr_bpm: null,
+  elevation_gain_m: null, active_calories_kcal: null,
 };
 
 async function setup(t, initial = [saved]) {
@@ -119,14 +121,15 @@ test("add training inline on the selected day across a multiweek horizon", async
   assert.equal(form().elements.day.value, day);
   await change(form().elements.activity, "gym");
   await change(form().elements.duration, "45");
-  await change(form().elements.effort, "6");
   await change(form().elements.notes, "Added inline");
   await submit();
   const request = state.requests.at(-1);
   assert.equal(request.method, "POST");
   assert.deepEqual(request.body, {
-    day, activity: "gym", status: "planned", duration_min: 45, effort: 6,
+    day, activity: "gym", status: "planned", duration_min: 45, effort: null,
     hr_zone_min: null, hr_zone_max: null, notes: "Added inline",
+    actual_duration_min: null, distance_km: null, average_hr_bpm: null,
+    elevation_gain_m: null, active_calories_kcal: null,
   });
   assert.equal(form(), null);
   assert.match(document.body.textContent, /Added inline/);
@@ -134,19 +137,19 @@ test("add training inline on the selected day across a multiweek horizon", async
   assert.equal(document.querySelector('[aria-labelledby="log-heading"]'), null);
 });
 
-// Editing must prefill stored values rather than replacing null metrics with presets.
+// Editing completed work shows results; switching to skipped preserves the edited values.
 test("edit preserves identity, supports moving dates and clearing fields", async (t) => {
   const state = await setup(t);
   await click(button("Edit"));
-  assert.equal(form().elements.duration.value, "");
+  assert.equal(form().elements.duration, undefined);
   assert.equal(form().elements.status.value, "completed");
   assert.equal(form().elements.effort.value, "8");
   const next = new Date(`${firstDay}T12:00:00`);
   next.setDate(next.getDate() + 1);
   await change(form().elements.day, dateString(next));
-  await change(form().elements.status, "skipped");
   await change(form().elements.effort, "");
   await change(form().elements.notes, "Moved inline");
+  await change(form().elements.status, "skipped");
   await submit();
   assert.equal(state.requests[0].method, "PUT");
   assert.equal(state.requests[0].path, "/api/sessions/7");
@@ -158,6 +161,30 @@ test("edit preserves identity, supports moving dates and clearing fields", async
   const card = document.querySelector(".calendar-card");
   assert.equal(card.closest(".calendar-day").querySelector("time").dateTime, dateString(next));
   assert.match(card.textContent, /Moved inline/);
+});
+
+// Logging a completed workout directly must save results and leave planned targets unknown.
+test("add completed training saves results without default targets", async (t) => {
+  const state = await setup(t, []);
+  await click(document.querySelector('button[aria-label^="Add training on"]'));
+  await change(form().elements.status, "completed");
+  assert.equal(form().elements.duration, undefined);
+  assert.equal(form().querySelector(".session-original-plan"), null);
+  await change(form().elements.actual_duration_min, "24");
+  await change(form().elements.distance_km, "4");
+  await change(form().elements.average_hr_bpm, "140");
+  await change(form().elements.notes, "Completed directly");
+  await submit();
+  assert.equal(state.sessions[0].duration_min, null);
+  assert.equal(state.sessions[0].hr_zone_min, null);
+  assert.equal(state.sessions[0].actual_duration_min, 24);
+  assert.equal(state.sessions[0].distance_km, 4);
+  assert.equal(state.sessions[0].average_hr_bpm, 140);
+  assert.match(document.querySelector(".calendar-card-overview").textContent, /4 km.*24 min.*6:00/);
+  await click(button("Edit"));
+  assert.equal(form().elements.actual_duration_min.value, "24");
+  assert.equal(form().elements.distance_km.value, "4");
+  assert.equal(form().querySelector(".session-original-plan"), null);
 });
 
 // Cancel never persists a draft or removes a previously generated proposal preview.
@@ -234,6 +261,7 @@ test("edit preserves HR targets and supports changing activity presets", async (
     ...saved, activity: "interval_run", duration_min: 46, hr_zone_min: 4, hr_zone_max: 5,
   }]);
   await click(button("Edit"));
+  await change(form().elements.status, "planned");
   const zone = form().querySelector("select:not([name])");
   assert.equal(zone.value, "4-5");
   assert.equal(form().elements.duration.value, "46");
