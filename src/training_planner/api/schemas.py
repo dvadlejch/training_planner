@@ -1,6 +1,7 @@
 """Validated JSON contracts kept separate from the framework-free domain."""
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -54,12 +55,38 @@ class ProposalMoveInput(BaseModel):
     session: SessionInput
 
 
+class TrainingTargetsInput(BaseModel):
+    """Simple weekly targets; interval runs are included in total runs."""
+
+    model_config = ConfigDict(extra="forbid")
+    gym: int = Field(default=3, ge=0, le=7, strict=True)
+    runs: int = Field(default=2, ge=0, le=7, strict=True)
+    intervals: int = Field(default=0, ge=0, le=2, strict=True)
+
+    @model_validator(mode="after")
+    def validate_mix(self) -> "TrainingTargetsInput":
+        """Keep interval sessions within the total run count."""
+        if self.intervals > self.runs:
+            raise ValueError("Interval target cannot exceed total runs")
+        return self
+
+
+class ProposalKeyInput(BaseModel):
+    """Identify one automatic suggestion without excluding other same-day events."""
+
+    model_config = ConfigDict(extra="forbid")
+    day: date
+    activity: Activity
+
+
 class PlanningRequest(BaseModel):
-    """Describe a rolling 7-28-day request; week_start may be any weekday."""
+    """Describe a fixed 28-day request; week_start may be any weekday."""
 
     model_config = ConfigDict(extra="forbid")
     week_start: date
-    weeks: int = Field(default=1, ge=1, le=4)
+    weeks: Literal[4] = 4
+    targets: TrainingTargetsInput = Field(default_factory=TrainingTargetsInput)
+    excluded: list[ProposalKeyInput] = Field(default_factory=list)
     blocked: set[date] = Field(default_factory=set)
     moves: list[ProposalMoveInput] = Field(default_factory=list)
     dismissed: set[date] = Field(default_factory=set)

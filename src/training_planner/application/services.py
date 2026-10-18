@@ -6,7 +6,13 @@ from datetime import date, timedelta
 from math import isfinite
 from pathlib import Path
 
-from training_planner.domain.models import ProposalMove, Session, Status
+from training_planner.domain.models import (
+    Activity,
+    ProposalMove,
+    Session,
+    Status,
+    TrainingTargets,
+)
 from training_planner.domain.running import validate_zone_target
 from training_planner.planner.rules import suggest_week
 from training_planner.storage.db import (
@@ -151,51 +157,60 @@ def _suggest_with_moves(
     not_before: date,
     moves: list[ProposalMove],
     dismissed: set[date],
+    targets: TrainingTargets,
+    excluded: set[tuple[date, Activity]],
 ) -> list[Session]:
     """Reserve explicit draft positions and plan around them without saving them.
 
     Manual draft positions follow the same user control as manually added sessions;
     they may override preferred weekdays and recovery spacing. Other suggestions
     still account for their workload. Both original and destination dates must be
-    inside the planning horizon, and destinations must be future, free and available.
+    inside the planning horizon. Destinations must be future and available; another
+    activity on the same date is allowed.
     """
     end = week_start + timedelta(days=7 * weeks - 1)
-    origins: set[date] = set()
-    occupied = {session.day for session in existing} | blocked
+    origins: set[tuple[date, Activity]] = set()
+    occupied = {(s.day, s.activity) for s in existing if s.status != Status.SKIPPED}
     pinned: list[Session] = []
     for move in moves:
         session = move.session
         if (
-            move.original_day in origins
+            (move.original_day, session.activity) in origins
             or not week_start <= move.original_day <= end
             or not max(week_start, not_before) <= session.day <= end
-            or session.day in occupied
+            or session.day in blocked
+            or (session.day, session.activity) in occupied
             or session.status != Status.PLANNED
             or session.id is not None
         ):
             raise ProposalConflict(
                 "A moved suggestion is unavailable; change its date or start a new plan"
             )
-        origins.add(move.original_day)
-        occupied.add(session.day)
+        origins.add((move.original_day, session.activity))
+        occupied.add((session.day, session.activity))
         pinned.append(session)
     generated = suggest_week(
         week_start,
         existing + pinned,
-        blocked | origins | dismissed,
+        blocked | dismissed,
         not_before=not_before,
-        weeks=weeks,
+        targets=targets,
+        excluded=origins | excluded,
     )
-    return sorted(pinned + generated, key=lambda session: session.day)
+    return sorted(
+        pinned + generated, key=lambda session: (session.day, session.activity.value)
+    )
 
 
 def generate_proposals(
     path: Path,
     week_start: date,
     blocked: set[date],
-    weeks: int = 1,
+    weeks: int = 4,
     moves: list[ProposalMove] | None = None,
     dismissed: set[date] | None = None,
+    targets: TrainingTargets = TrainingTargets(),
+    excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
     """Generate a preview without saving any proposed workouts.
 
@@ -208,7 +223,7 @@ def generate_proposals(
     week_start : date
         Inclusive start date of the rolling horizon, on any weekday.
     weeks : int
-        Planning horizon, from one to four weeks.
+        Fixed four-week (28-day) planning horizon.
     blocked : set[date]
         Ephemeral whole-day restrictions for this planning request.
     moves : list[ProposalMove] | None
@@ -216,10 +231,15 @@ def generate_proposals(
     dismissed : set[date] | None
         Dates excluded from automatic suggestions in this preview.
 
+    targets : TrainingTargets
+        Soft counts per seven-day period; intervals are part of total runs.
+    excluded : set[tuple[date, Activity]] | None
+        Individual workout exclusions, preserving other same-day activities.
+
     Returns
     -------
     list[Session]
-        Unsaved suggestions from the existing starter rules.
+        Unsaved suggestions from the target and recovery rules.
 
     Raises
     ------
@@ -230,8 +250,8 @@ def generate_proposals(
     sqlite3.Error
         If the database operation fails.
     """
-    if not 1 <= weeks <= 4:
-        raise ValueError("weeks must be between 1 and 4")
+    if weeks != 4:
+        raise ValueError("weeks must be 4 (28 days)")
     existing = get_sessions(
         path, week_start - timedelta(days=7), week_start + timedelta(days=7 * weeks + 6)
     )
@@ -243,6 +263,8 @@ def generate_proposals(
         _planning_date(),
         moves or [],
         dismissed or set(),
+        targets,
+        excluded or set(),
     )
 
 
@@ -251,10 +273,12 @@ def accept_proposals(
     week_start: date,
     blocked: set[date],
     proposals: list[Session],
-    weeks: int = 1,
+    weeks: int = 4,
     moves: list[ProposalMove] | None = None,
     dismissed: set[date] | None = None,
     confirm: bool = False,
+    targets: TrainingTargets = TrainingTargets(),
+    excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
 
@@ -269,7 +293,7 @@ def accept_proposals(
     blocked : set[date]
         Whole-day restrictions used to generate the preview.
     weeks : int
-        Same one-to-four-week horizon used for the preview.
+        Same fixed four-week horizon used for the preview.
     proposals : list[Session]
         Unmodified suggestions selected for acceptance; an empty list is allowed.
     moves : list[ProposalMove] | None
@@ -278,6 +302,10 @@ def accept_proposals(
         Same excluded suggestion dates used during generation.
     confirm : bool
         Save validated suggestions as confirmed upcoming workouts when true.
+    targets : TrainingTargets
+        Same training targets used for the preview.
+    excluded : set[tuple[date, Activity]] | None
+        Same per-workout exclusions used for the preview.
 
     Returns
     -------
@@ -295,8 +323,8 @@ def accept_proposals(
     sqlite3.Error
         If the database operation fails; the entire selection is rolled back.
     """
-    if not 1 <= weeks <= 4:
-        raise ValueError("weeks must be between 1 and 4")
+    if weeks != 4:
+        raise ValueError("weeks must be 4 (28 days)")
     with closing(connect(path)) as conn, conn:
         # Reserve the write transaction before reading so competing requests
         # cannot book a proposed date between validation and insertion.
@@ -319,10 +347,12 @@ def accept_proposals(
             not_before,
             moves or [],
             dismissed or set(),
+            targets,
+            excluded or set(),
         )
-        if len({session.day for session in proposals}) != len(proposals):
+        if len({(s.day, s.activity) for s in proposals}) != len(proposals):
             raise ProposalConflict(
-                "Duplicate proposed dates; generate suggestions again"
+                "Duplicate proposed workouts; generate suggestions again"
             )
         if any(session not in available for session in proposals):
             raise ProposalConflict(

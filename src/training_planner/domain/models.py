@@ -74,3 +74,23 @@ class ProposalMove:
 
     original_day: date
     session: Session
+
+
+@dataclass(frozen=True)
+class TrainingTargets:
+    """Soft session counts per rolling seven-day period, including saved work."""
+
+    gym: int = 3
+    runs: int = 2
+    intervals: int = 0
+
+    def __post_init__(self) -> None:
+        """Reject unsupported counts and intervals outside the total run target."""
+        if any(
+            type(value) is not int for value in (self.gym, self.runs, self.intervals)
+        ):
+            raise ValueError("Training targets must be whole-number counts")
+        if not 0 <= self.gym <= 7 or not 0 <= self.runs <= 7:
+            raise ValueError("Gym and running targets must be between 0 and 7")
+        if not 0 <= self.intervals <= min(2, self.runs):
+            raise ValueError("Intervals must be between 0 and 2 and within total runs")

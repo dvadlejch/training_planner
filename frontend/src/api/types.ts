@@ -30,10 +30,24 @@ export interface ProposalMove {
   session: SessionInput;
 }
 
+export interface TrainingTargets {
+  gym: number;
+  runs: number;
+  /** Included within total runs. */
+  intervals: number;
+}
+
+export interface ProposalKey {
+  day: string;
+  activity: SessionInput["activity"];
+}
+
 export interface PlanningRequest {
   /** Inclusive start of the rolling horizon; new plans use today's local date. */
   week_start: string;
-  weeks: number;
+  weeks: 4;
+  targets: TrainingTargets;
+  excluded?: ProposalKey[];
   blocked: string[];
   moves?: ProposalMove[];
   dismissed?: string[];

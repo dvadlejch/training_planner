@@ -111,8 +111,8 @@ The planner must be clear about what information actually influenced a suggestio
 
 ### 7.1 Planning behavior
 
-- The user chooses a horizon, initially **1–4 weeks**, and presses **Generate suggestions / Replan**.
-- The system starts today and considers the next 7, 14, 21 or 28 days, including today.
+- Suggestions always cover the next **28 days**, starting today; the user presses **Generate suggestions / Replan**.
+- The system includes today and the following 27 days. The horizon is fixed rather than user-configurable.
 - Recommendations are shown as a **preview** with proposed calendar positions, workout types, approximate duration/intensity, and an explanation.
 - The user may accept/reject each suggestion or explicitly accept a batch. **Nothing is committed before approval.**
 - Existing accepted sessions stay where they are by default. If the app thinks a change would help, it may offer it as a clearly separate opt-in suggestion, but must not move the session on its own.
@@ -164,7 +164,7 @@ For optional replacement recommendations, clearly show the proposed change and r
 
 ### First use with no metrics
 
-The user opens a mostly empty calendar, optionally sets training preferences, marks busy sections, chooses a one-week horizon and presses **Generate suggestions**. The engine generates cautious proposals using defaults and available calendar space. VO2 max, heart rate, past workouts and readiness are **not** prerequisites.
+The user opens a mostly empty calendar, optionally sets training preferences, marks busy sections, reviews the training targets and presses **Generate suggestions**. The engine generates cautious proposals using defaults and available calendar space. VO2 max, heart rate, past workouts and readiness are **not** prerequisites.
 
 ### Busy travel week
 
@@ -197,7 +197,7 @@ The user blocks every calendar section. The planner returns **no workout suggest
 - Accepted/proposed/completed session states and preservation of accepted sessions.
 - Quick completion and optional workout metrics (including running/cycling/hiking basics).
 - Editable goals, priorities, flexible targets and preferred training windows.
-- Manual 1–4-week suggestion generation, preview, per-item approval and understandable reasoning.
+- Manual 28-day suggestion generation, preview, per-item approval and understandable reasoning.
 - Conservative scheduling rules using optional training history and optional basic recovery feedback.
 - Local storage and basic automated tests for scheduling invariants.
 
@@ -214,26 +214,71 @@ The user blocks every calendar section. The planner returns **no workout suggest
 
 The starter currently provides:
 
-- A local **React/TypeScript** interface centered on an editable full-month calendar with Monday-to-Sunday rows, previous/next month navigation and a Today button. All dates remain displayed while loading and editing; narrow screens show the same dates as a day-by-day agenda. Workout cards expand to show details and actions. The 1-4-week suggestion horizon is independent of the month view; navigate between months without losing unsaved suggestions. Each day has **Add training**; saved entries have **Edit** and **Delete**. Add/edit forms open in the adjacent tools panel (below the calendar on mobile) for the selected day with Save and Cancel controls. Edit the date to move an activity, or change its type, status, duration, HR zone, RPE and notes. Failed saves preserve the draft for correction or retry. Successful additions and non-date edits clear the suggestion preview; date changes instead ask whether to recalculate it.
+- A local **React/TypeScript** interface centered on an editable full-month calendar with Monday-to-Sunday rows, previous/next month navigation and a Today button. All dates remain displayed while loading and editing; narrow screens show the same dates as a day-by-day agenda. Workout cards expand to show details and actions. The fixed 28-day suggestion horizon is independent of the month view; navigate between months without losing unsaved suggestions. Each day has **Add training**; saved entries have **Edit** and **Delete**. Add/edit forms open in the adjacent tools panel (below the calendar on mobile) for the selected day with Save and Cancel controls. Edit the date to move an activity, or change its type, status, duration, HR zone, RPE and notes. Failed saves preserve the draft for correction or retry. Successful additions and non-date edits clear the suggestion preview; date changes instead ask whether to recalculate it.
 - The **calm outdoor interface** uses warm neutral surfaces, forest-green controls, activity colour accents and separate labelled status badges. Suggestion generation and the expandable heart-rate reference live in the tools panel; **Plan training** opens and focuses the suggestion controls. Suggestions are confirmed directly on their calendar cards. No remote fonts or assets are required.
 - **Mouse drag-and-drop** moves saved workouts and unsaved suggestions. Moving a confirmed or completed workout requires confirmation, including date changes through Edit; planned/skipped workouts and suggestions move without approval. After each successful move, a separate **Recalculate / Keep current suggestions** dialog asks whether to regenerate the preview. Cancelling a move or a failed save leaves both the workout and preview intact. Keeping suggestions preserves their positions; confirmation still rechecks the current calendar. Recalculation keeps manually moved draft dates while generating other suggestions around their workload. A recalculation failure leaves the completed move and preview intact for retry. Drafts remain unsaved until their **Confirm** button is pressed.
-- Each unsaved suggestion has **Confirm** and **Remove** buttons visible even while collapsed. Removal requires no confirmation and leaves saved workouts untouched. After removal, the **Recalculate / Keep current suggestions** dialog offers to update the remaining preview. Recalculation keeps dismissed dates free and discards any removed draft move; a fresh **Generate suggestions** resets removals. An explicit draft move may still use a dismissed date. Proposal generation and acceptance carry these temporary date exclusions in optional `dismissed: ["2026-10-06"]`.
-- Drag the move handle, or click it to edit the date with the keyboard. Saved workouts may move to occupied or shaded adjacent-month dates. Suggestions require a free, available date inside their planning horizon, today or later. Moves preserve workout details and the displayed month. Dragging is disabled during loading, saving, editing and the rescheduling dialog. Touch dragging, dragging through month navigation and timed placement are not implemented.
-- Proposal requests support optional `moves: [{ "original_day": "2026-10-06", "session": { "day": "2026-10-08", "activity": "gym", "status": "planned" } }]`. These are explicit user-positioned drafts: generation reserves their destinations and does not refill their original dates. They may override preferred weekdays and recovery spacing, as manual training entries can; newly generated workouts account for their workload. Send the same `moves` with acceptance. The server rechecks dates, availability, duplicate origins/destinations, planned status and intervening bookings, and accepts selected drafts atomically. A fresh **Generate suggestions** starts a new plan without retaining manual draft moves.
+- Each unsaved suggestion has **Confirm** and **Remove** buttons visible even while collapsed. Removal requires no confirmation and leaves saved workouts untouched. After removal, the **Recalculate / Keep current suggestions** dialog offers to update the remaining preview. Recalculation excludes the removed workout type on its date, preserves other same-day activities and discards any removed draft move; a fresh **Generate suggestions** resets removals. An explicit draft move may still use a dismissed date. Proposal generation and acceptance carry per-workout exclusions in optional `excluded: [{ "day": "2026-10-06", "activity": "gym" }]`. The legacy `dismissed` date list remains available to API clients for whole-day exclusions.
+- Drag the move handle, or click it to edit the date with the keyboard. Saved workouts may move to occupied or shaded adjacent-month dates. Suggestions may move to a date containing a different workout type, provided the date is available, inside the 28-day horizon and today or later. A second draft or active saved workout of the same type on that date is rejected. Moves preserve workout details and the displayed month. Dragging is disabled during loading, saving, editing and the rescheduling dialog. Touch dragging, dragging through month navigation and timed placement are not implemented.
+- Proposal requests support optional `moves: [{ "original_day": "2026-10-06", "session": { "day": "2026-10-08", "activity": "gym", "status": "planned" } }]`. These are explicit user-positioned drafts: generation reserves their workout type at the destination and excludes that type at the original date. Other activities may use either date. They may override preferred weekdays and recovery spacing, as manual training entries can; newly generated workouts account for their workload. Send the same `moves` with acceptance. The server rechecks dates, availability, duplicate (date, activity) origins/destinations, planned status and intervening bookings, and accepts selected drafts atomically. A fresh **Generate suggestions** starts a new plan without retaining manual draft moves.
 - A **Status** dropdown on every saved activity changes planned/confirmed/completed/skipped directly in the calendar. **Confirm** on a planned activity marks it committed but still upcoming. Status changes preserve other workout details and clear the suggestion preview only on success. Confirmed entries remain editable and count as booked training during suggestion generation. `PATCH /api/sessions/{session_id}/status` accepts only `{ "status": "confirmed" }` (or another supported status).
 - A **Delete** button on each saved calendar activity. Deleting any saved activity (including accepted suggestions, completed and skipped workouts) requires confirmation. Deletion is permanent, refreshes the calendar and clears the suggestion preview; cancelling or a failed deletion keeps the activity. The API exposes `DELETE /api/sessions/{session_id}` (204 on success, 404 if missing).
 - A **FastAPI** backend with validated session and planning endpoints, including `PUT /api/sessions/{session_id}` for replacing a saved activity while preserving its identifier (404 if missing).
-- Suggestions always start **today**, with a rolling **7, 14, 21 or 28 days** selected through the planning horizon. There is no start-date input. Generating a new plan shows the current month; month navigation remains independent of the planning window. Calendar weekday preferences remain unchanged. The API retains the `week_start` field name for compatibility, but it now accepts any weekday as the inclusive start; confirmation and recalculation reuse the preview's original window.
-- An **Unavailable** checkbox on each calendar day excludes it from suggestions. Marks persist across month navigation and planning-window changes until the page is reloaded. Changing availability clears unsaved suggestions while preserving saved workouts; the separate unavailable-day list has been removed.
+- Suggestions always start **today** and cover a fixed **28 days**. The horizon selector has been removed. There is no start-date input. Generating a new plan shows the current month; month navigation remains independent of the planning window. Weekdays are placement preferences, with gym and easy-running alternatives when those dates are unavailable. The API retains the `week_start` field name for compatibility, but it now accepts any weekday as the inclusive start; confirmation and recalculation reuse the preview's original window and targets. The optional API `weeks` field defaults to 4 and rejects every other value.
+- An **Unavailable** checkbox on each calendar day excludes it from suggestions. Marks persist across month navigation and training-target changes until the page is reloaded. Changing availability clears unsaved suggestions while preserving saved workouts; the separate unavailable-day list has been removed.
 - Explicit **Generate suggestions** and calendar-only review: expand suggestion cards for details and use each card's **Confirm** button to save that suggestion as confirmed upcoming training. Other suggestions remain unsaved and available for review; failed confirmation preserves the draft for retry. There are no selection checkboxes or batch selection controls. **Dismiss all** clears the remaining unsaved suggestions without affecting saved workouts. Confirmation sends `confirm: true` to `POST /api/proposals/accept`, which revalidates the original draft and saves the confirmed status in the same transaction. API clients omitting `confirm` retain the existing planned-status acceptance behavior.
 - SQLite storage using the current sessions schema, with **planned, confirmed, completed or skipped** status. Planned duration and main-set HR zones are separate from recorded results; all metrics are optional and blank values remain null.
 - Activity-specific recorded results: running has distance (km), actual duration (min), average HR (bpm), calculated average pace (min/km), and active calories (kcal); cycling has distance, actual duration, average HR, elevation gain (m), and active calories; hiking has distance, actual duration, calculated average pace, elevation gain, and active calories. Gym has actual duration, active calories and multiline notes for weights and repetitions. Recorded RPE is optional for all activities. Average pace uses actual total duration divided by distance; it is not a separate editable value or moving pace. Zero or missing distance/time leaves pace unspecified.
 - Event cards show upcoming targets or a compact summary of completed results. Expanded details group training targets, recorded results, and notes. Completed sessions with a recorded duration use it for duration-based recovery checks; otherwise those checks fall back to planned duration. Distance, average HR, pace, elevation and calories are stored/displayed but do not yet influence recommendations.
 - Add/edit fields follow the selected status: **planned/confirmed** show targets and planning notes; **completed** shows activity-specific results, RPE and workout notes, with existing targets in a collapsed, read-only **Original plan** section; **skipped** shows only date, activity and status. Switching status preserves both saved values and unsaved drafts. Completing a workout does not require metrics. New activities saved directly as completed or skipped do not receive default planned targets; explicitly edited targets are retained. Changing activity while recording results does not overwrite the original targets.
-- Deterministic **1-4-week, day-level rules** for gym, easy runs, weekend hikes and flexible long-run dates.
+- Deterministic **28-day, day-level rules** with gym/running targets, optional interval runs, weekend hikes and flexible long-run dates.
 - Unit tests for the planner/storage and integration tests for API validation, proposal preservation and transactional acceptance.
 
 **Not yet implemented:** the daypart calendar, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
+
+
+### Simple training targets and multiple daily events
+
+The Suggestions panel offers **gym sessions per week (0-7)**, **runs per week
+(0-7)**, and **interval runs (0-2, included in total runs)**. Defaults are three gym
+sessions, two runs and no intervals. Lowering total runs automatically lowers the
+interval selection if needed. Targets and availability are temporary page state
+and reset on reload; changing either clears the unsaved preview.
+
+For this first version, "per week" means each of four consecutive seven-day periods
+starting on the preview's start date, rather than partial Monday-Sunday weeks.
+Targets are soft: availability, existing bookings and recovery can leave them unmet.
+Planned, confirmed and completed workouts count; skipped workouts do not count or
+occupy suggestion capacity. All running categories, including races, count toward
+total runs; only interval runs satisfy the interval target. Other proposed runs
+are easy or long easy runs. A single-run target uses an easy run.
+Zero gym/running targets disable those suggestions, while the existing independent
+Saturday hike suggestions remain.
+
+The calendar, storage and manual add/edit workflow support multiple workouts per
+date without exact times. Automatic generation permits at most two events per day,
+pairing an easy/recovery run with ordinary gym training where recovery allows.
+It does not automatically pair two runs, demanding activities, or training with
+an explicit rest booking. Manual entries may still exceed these automatic limits.
+No database migration is needed: multiple saved entries per date were already supported.
+
+Proposal identity uses **(date, activity)**, so removing, moving or confirming a gym
+draft does not affect a same-day running draft. Saved entries retain their database
+identifiers. Acceptance still rejects duplicate workout proposals and revalidates
+the whole selection atomically.
+
+API generation and acceptance both accept the same optional input:
+```json
+{
+  "week_start": "2026-10-18",
+  "targets": { "gym": 3, "runs": 3, "intervals": 1 },
+  "blocked": [],
+  "excluded": []
+}
+```
+
+Named running modes, personalized progression, cross-period gym carryover,
+gym workout rotation, persisted preferences and exact-time/daypart conflicts
+remain planned.
 
 ## 11. Technical architecture
 
@@ -242,7 +287,7 @@ The project uses Python 3.11+, **FastAPI** for HTTP endpoints, **React 19 + Type
 ```text
 src/training_planner/
   domain/models.py        # Framework-independent workout types and statuses
-  planner/rules.py        # Pure, deterministic rules over a 1-4-week horizon
+  planner/rules.py        # Pure target/recovery rules over a fixed 28-day horizon
   application/services.py # Session CRUD, previews and transactional acceptance
   storage/db.py           # SQLite connection and session repository
   api/app.py              # FastAPI app factory and /api endpoints
@@ -383,20 +428,21 @@ repetitions, then 10 min easy cool-down = 45 min total. The Z4-5 target applies
 only to work bouts, building toward approximately 85-95% HRmax. Heart rate lags
 changes in effort; do not sprint to force the target at the start of a repetition.
 
-The starter scheduler still uses fixed gym weekdays and does not automatically prescribe
-hard running without training history. It now assigns Z2 to running proposals and considers
-saved neighboring-week sessions and newly proposed outings when checking recovery.
-Choose a 1-4-week horizon and mark **Unavailable** directly on calendar days to exclude them from suggestions. Browse months to mark dates across the horizon; availability marks survive month navigation and changes to the planning start or horizon. Changing availability clears unsaved suggestions without changing saved workouts. These choices remain local to the current page and reset on reload.
+The scheduler prefers Tuesday/Wednesday/Friday gym dates and searches alternative dates
+within each seven-day target period. Easy and long-run proposals use Z2. Interval proposals
+use Z4-5 main-set targets only when explicitly requested through the interval count.
+Saved neighboring-week sessions and newly proposed outings influence recovery checks.
+Suggestions cover the next 28 days. Mark **Unavailable** directly on calendar days to exclude them. Browse months to mark dates across the horizon; availability marks survive month navigation and target changes. Changing availability clears unsaved suggestions without changing saved workouts. These choices remain local to the current page and reset on reload.
 Hard run categories, Z4-5 targets, RPE >=7, and long endurance outings (>=90 min)
 count as demanding, including easy and recovery runs. Skipped sessions do not count.
 Two calendar days is the default buffer for demanding work; races and demanding outings >=120 min use three.
 These are conservative configurable-in-code heuristics, not measured recovery times.
 Recovery checks protect endurance in either insertion order, including a saved short long-run
 entry next to a proposed hike. Ordinary gym entries have unknown load; explicit demanding
-gym metrics still count. Monday easy runs shorten to 20 minutes around nearby demanding
-work. Non-demanding Monday easy runs of at most 20 minutes are a recovery exception,
+gym metrics still count. Monday easy suggestions use a fixed 20-minute starting duration so accepting other
+suggestions does not rewrite their contents. Non-demanding Monday easy runs of at most 20 minutes are a recovery exception,
 whether saved or proposed, so accepting them does not change compatible suggestions. Hikes stay on Saturdays. Long runs prefer Sunday, then search up
-to six later days within the selected horizon, ahead of default gym/easy-run slots.
+to six later days within the selected horizon, ahead of gym/easy-run slots when the total running target is at least two.
 Saved and proposed long runs stay at least seven days apart to avoid piling up deferred runs.
 If no eligible date exists, the suggestion is omitted. Only today and later dates are proposed.
 Blocked days cannot receive training but still count toward recovery in calendar days.

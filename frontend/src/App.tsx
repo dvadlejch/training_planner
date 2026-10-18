@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession, updateSession, updateSessionStatus } from "./api/client";
-import { type PlanningRequest, type Session, type SessionInput } from "./api/types";
+import { type PlanningRequest, type Session, type SessionInput, type TrainingTargets } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
 import RescheduleDialog from "./components/RescheduleDialog";
 import SessionForm from "./components/SessionForm";
 import { addDays, localDate, monthRange, shiftMonth } from "./calendar";
+
+function sameWorkout(a: Pick<SessionInput, "day" | "activity">, b: Pick<SessionInput, "day" | "activity">): boolean {
+  return a.day === b.day && a.activity === b.activity;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The operation could not be completed.";
@@ -27,7 +31,7 @@ export default function App(): ReactElement {
   const range = monthRange(month);
   const monthLabel = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" })
     .format(new Date(`${month}-01T12:00:00`));
-  const [weeks, setWeeks] = useState(1);
+  const [targets, setTargets] = useState<TrainingTargets>({ gym: 3, runs: 2, intervals: 0 });
   const [blocked, setBlocked] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [preview, setPreview] = useState<{
@@ -107,7 +111,7 @@ export default function App(): ReactElement {
   }
 
   function askToReschedule(input = preview?.input ?? {
-    week_start: localDate(new Date()), weeks, blocked: [...blocked],
+    week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, blocked: [...blocked],
   }): void {
     setReschedule(input);
   }
@@ -118,13 +122,13 @@ export default function App(): ReactElement {
     const input = preview.input;
     const end = addDays(input.week_start, input.weeks * 7 - 1);
     if (day < input.week_start || day > end || day < localDate(new Date()) ||
-        input.blocked.includes(day) || sessions.some((item) => item.day === day) ||
-        preview.sessions.some((item) => item !== session && item.day === day)) {
-      setError("Choose a free, available date within the suggestion horizon, today or later.");
+        input.blocked.includes(day) || sessions.some((item) => item.status !== "skipped" && sameWorkout(item, { ...session, day })) ||
+        preview.sessions.some((item) => item !== session && sameWorkout(item, { ...session, day }))) {
+      setError("Choose an available date within the 28-day horizon without the same workout type, today or later.");
       return;
     }
     const { id: _id, ...moved } = { ...session, day };
-    const previousMove = input.moves?.find((move) => move.session.day === session.day);
+    const previousMove = input.moves?.find((move) => sameWorkout(move.session, session));
     const originalDay = previousMove?.original_day ?? session.day;
     const moves = (input.moves ?? []).filter((move) => move !== previousMove);
     moves.push({ original_day: originalDay, session: moved });
@@ -142,12 +146,14 @@ export default function App(): ReactElement {
   function removeProposal(session: Session): void {
     if (interactionBlocked || loading || editing || !preview) return;
     if (!preview.sessions.includes(session)) return;
-    const move = preview.input.moves?.find((item) => item.session.day === session.day);
-    const dismissed = [...new Set([
-      ...(preview.input.dismissed ?? []), session.day, ...(move ? [move.original_day] : []),
-    ])];
+    const move = preview.input.moves?.find((item) => sameWorkout(item.session, session));
+    const excluded = [
+      ...(preview.input.excluded ?? []),
+      { day: session.day, activity: session.activity },
+      ...(move ? [{ day: move.original_day, activity: session.activity }] : []),
+    ];
     const nextInput = {
-      ...preview.input, dismissed,
+      ...preview.input, excluded,
       moves: (preview.input.moves ?? []).filter((item) => item !== move),
     };
     setPreview({
@@ -155,7 +161,7 @@ export default function App(): ReactElement {
       sessions: preview.sessions.filter((item) => item !== session),
     });
     setError("");
-    setNotice("Suggestion removed. Recalculation will keep its date free; generating a new plan resets removals.");
+    setNotice("Suggestion removed. Recalculation will keep this workout excluded; generating a new plan resets removals.");
     askToReschedule(nextInput);
   }
 
@@ -184,7 +190,7 @@ export default function App(): ReactElement {
 
   async function generate(): Promise<void> {
     if (interactionBlocked || editing || loading) return;
-    const input = { week_start: localDate(new Date()), weeks, blocked: [...blocked] };
+    const input = { week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, blocked: [...blocked] };
     await run(async () => {
       setPreview(null);
       const proposed = await generateProposals(input);
@@ -199,15 +205,16 @@ export default function App(): ReactElement {
     await run(async () => {
       await acceptProposals(preview.input, [session], true);
       // A persisted move is now a booking, so stop sending it as an unsaved move.
-      const move = preview.input.moves?.find((item) => item.session.day === session.day);
+      const move = preview.input.moves?.find((item) => sameWorkout(item.session, session));
       const remaining = preview.sessions.filter((item) => item !== session);
       setPreview(remaining.length ? {
         input: {
           ...preview.input,
           moves: (preview.input.moves ?? []).filter((item) => item !== move),
-          dismissed: [...new Set([
-            ...(preview.input.dismissed ?? []), ...(move ? [move.original_day] : []),
-          ])],
+          excluded: [
+            ...(preview.input.excluded ?? []),
+            ...(move ? [{ day: move.original_day, activity: session.activity }] : []),
+          ],
         },
         sessions: remaining,
       } : null);
@@ -261,7 +268,7 @@ export default function App(): ReactElement {
           {preview && (
             <div className="calendar-suggestion-toolbar" role="group" aria-label="Suggestion actions">
               {preview.sessions.length === 0 ? (
-                <p role="status">{preview.input.dismissed?.length ? "No suggestions remain. Generate a new plan to start again." : "No eligible dates under the current rules and availability."}</p>
+                <p role="status">{(preview.input.excluded?.length || preview.input.dismissed?.length) ? "No suggestions remain. Generate a new plan to start again." : "No eligible dates under the current rules and availability."}</p>
               ) : null}
               <button className="secondary" disabled={interactionBlocked || editing}
                 onClick={() => {
@@ -331,16 +338,30 @@ export default function App(): ReactElement {
           <summary><span className="eyebrow">Your next chapter</span><h2 id="proposal-heading">Suggestions</h2></summary>
           <p className="muted">A little structure, on your terms. Choose your dates and make a plan that fits.</p>
           <div className="planning-controls">
-            <label>Planning horizon<select value={weeks} disabled={interactionBlocked || editing} onChange={(event) => {
-              const next = Number(event.target.value);
-              setWeeks(next);
-              setPreview(null); setError(""); setNotice("");
-            }}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>
-              {count} {count === 1 ? "week" : "weeks"}
-            </option>)}</select></label>
+            {([
+              ["gym", "Gym sessions per week", 7],
+              ["runs", "Runs per week", 7],
+              ["intervals", "Interval runs (included in total)", Math.min(2, targets.runs)],
+            ] as const).map(([key, label, max]) => (
+              <label key={key}>{label}<select aria-label={label} value={targets[key]}
+                disabled={interactionBlocked || editing}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setTargets((current) => {
+                    const next = { ...current, [key]: value };
+                    return { ...next, intervals: Math.min(next.intervals, next.runs) };
+                  });
+                  setPreview(null); setError(""); setNotice("");
+                }}>
+                {Array.from({ length: max + 1 }, (_, count) => (
+                  <option key={count} value={count}>{count}</option>
+                ))}
+              </select></label>
+            ))}
           </div>
-          <p className="muted">Suggestions start today and cover the next {weeks * 7} days, including today.</p>
-          <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Availability choices are temporary and last until you reload the page.</p>
+          <p className="muted">Suggestions start today and cover the next 28 days, including today.</p>
+          <p className="muted">Targets apply to each seven-day period starting today. Saved workouts count toward them. Availability and recovery may leave targets unmet. Other runs are easy or long easy runs. An easy run and gym session can share a day.</p>
+          <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Targets and availability choices last until you reload the page.</p>
           <button disabled={interactionBlocked || loading || editing} onClick={generate}>Generate suggestions</button>
 
         </details>

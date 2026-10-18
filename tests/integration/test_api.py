@@ -1,6 +1,6 @@
 """Verify API boundaries and transactional proposal acceptance."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,7 +41,7 @@ def test_session_round_trip_preserves_unknown_metrics(client):
     assert saved["duration_min"] is None
     assert saved["effort"] is None
     response = client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     )
     assert response.json() == [saved]
 
@@ -56,7 +56,7 @@ def test_preview_is_not_persisted_and_acceptance_is_explicit(client):
     assert all(item["day"] != "2026-10-06" for item in preview)
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == []
     )
@@ -84,7 +84,7 @@ def test_confirm_suggestion_saves_only_that_workout_as_confirmed(client):
     assert isinstance(saved["id"], int)
     assert saved == {**proposal, "status": "confirmed", "id": saved["id"]}
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [saved]
     repeated = client.post(
         "/api/proposals/accept",
@@ -109,7 +109,7 @@ def test_confirm_suggestion_rejects_an_altered_draft(client):
     assert response.status_code == 409
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == []
     )
@@ -150,7 +150,7 @@ def test_stale_batch_is_rejected_without_partial_acceptance(client):
     )
     assert response.status_code == 409
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [booking]
 
 
@@ -221,11 +221,10 @@ def test_rolling_sunday_preview_can_be_confirmed(client, planning_clock):
     response = client.post("/api/proposals", json=request)
     assert response.status_code == 200
     preview = response.json()
-    assert {item["day"] for item in preview if item["activity"] == "gym"} == {
-        "2026-10-21",
-        "2026-10-23",
-    }
-    assert all("2026-10-18" <= item["day"] <= "2026-10-24" for item in preview)
+    gym_days = {item["day"] for item in preview if item["activity"] == "gym"}
+    assert {"2026-10-21", "2026-10-23"} <= gym_days
+    assert len(gym_days) == 12
+    assert all("2026-10-18" <= item["day"] <= "2026-11-14" for item in preview)
     draft = next(item for item in preview if item["day"] == "2026-10-21")
     proposal = {key: value for key, value in draft.items() if key != "id"}
     accepted = client.post(
@@ -240,7 +239,9 @@ def test_fully_blocked_week_and_empty_acceptance_are_valid(client):
     """A rest week and declining every suggestion are valid workflows."""
     request = {
         "week_start": "2026-10-05",
-        "blocked": [f"2026-10-{day:02}" for day in range(5, 12)],
+        "blocked": [
+            (date(2026, 10, 5) + timedelta(days=i)).isoformat() for i in range(28)
+        ],
     }
     assert client.post("/api/proposals", json=request).json() == []
     response = client.post("/api/proposals/accept", json={**request, "proposals": []})
@@ -291,7 +292,7 @@ def test_acceptance_preserves_existing_completed_session(client):
         == 201
     )
     sessions = client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json()
     assert saved in sessions
 
@@ -322,7 +323,7 @@ def test_acceptance_saves_only_selected_proposals(client):
     assert [item["day"] for item in saved] == [item["day"] for item in selected]
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == saved
     )
@@ -348,7 +349,7 @@ def test_acceptance_rechecks_date_after_midnight(
 
     assert response.status_code == (409 if include_elapsed else 201)
     saved = client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json()
     if include_elapsed:
         assert saved == []
@@ -363,16 +364,14 @@ def test_generation_excludes_elapsed_dates(client, planning_clock):
     response = client.post("/api/proposals", json={"week_start": "2026-10-05"})
 
     assert response.status_code == 200
-    assert [item["day"] for item in response.json()] == [
-        "2026-10-07",
-        "2026-10-09",
-        "2026-10-10",
-    ]
+    assert response.json()
+    assert all("2026-10-07" <= item["day"] <= "2026-11-01" for item in response.json())
+    assert any(item["day"] == "2026-10-07" for item in response.json())
 
 
-def test_generation_returns_empty_preview_for_elapsed_week(client, planning_clock):
-    """A wholly elapsed week produces no suggestions rather than an error."""
-    planning_clock["today"] = date(2026, 10, 12)
+def test_generation_returns_empty_preview_for_elapsed_horizon(client, planning_clock):
+    """A wholly elapsed horizon produces no suggestions rather than an error."""
+    planning_clock["today"] = date(2026, 11, 2)
     response = client.post("/api/proposals", json={"week_start": "2026-10-05"})
 
     assert response.status_code == 200
@@ -381,6 +380,7 @@ def test_generation_returns_empty_preview_for_elapsed_week(client, planning_cloc
 
 @pytest.mark.parametrize("low,high", [(0, 2), (2, 6), (4, 2), (2, None), (None, 2)])
 def test_invalid_hr_targets_are_rejected(client, low, high):
+    """Invalid hr targets are rejected."""
     response = client.post(
         "/api/sessions",
         json={
@@ -394,6 +394,7 @@ def test_invalid_hr_targets_are_rejected(client, low, high):
 
 
 def test_interval_target_and_duration_round_trip(client):
+    """Interval target and duration round trip."""
     payload = {
         "day": "2026-10-06",
         "activity": "interval_run",
@@ -410,12 +411,13 @@ def test_interval_target_and_duration_round_trip(client):
         "/api/sessions",
         params={
             "start": "2026-10-05",
-            "end": "2026-10-11",
+            "end": "2026-11-01",
         },
     ).json() == [saved]
 
 
 def test_planning_loads_previous_week_recovery(client):
+    """Planning loads previous week recovery."""
     client.post(
         "/api/sessions",
         json={
@@ -431,6 +433,7 @@ def test_planning_loads_previous_week_recovery(client):
 
 
 def test_altered_zone_target_cannot_be_accepted(client):
+    """Altered zone target cannot be accepted."""
     request = {"week_start": "2026-10-05"}
     item = client.post("/api/proposals", json=request).json()[0]
     item.pop("id")
@@ -447,8 +450,9 @@ def test_altered_zone_target_cannot_be_accepted(client):
     )
 
 
-@pytest.mark.parametrize("weeks", [0, 5, 1.5])
+@pytest.mark.parametrize("weeks", [0, 1, 2, 3, 5, 1.5])
 def test_invalid_planning_horizon_is_rejected(client, weeks):
+    """Invalid planning horizon is rejected."""
     request = {"week_start": "2026-10-05", "weeks": weeks}
     assert client.post("/api/proposals", json=request).status_code == 422
     assert (
@@ -463,10 +467,11 @@ def test_invalid_planning_horizon_is_rejected(client, weeks):
     )
 
 
-def test_two_week_fallback_round_trip_and_neighboring_booking_revalidation(client):
+def test_four_week_fallback_round_trip_and_neighboring_booking_revalidation(client):
+    """Two week fallback round trip and neighboring booking revalidation."""
     request = {
         "week_start": "2026-10-05",
-        "weeks": 2,
+        "weeks": 4,
         "blocked": ["2026-10-10", "2026-10-11"],
     }
     preview = client.post("/api/proposals", json=request)
@@ -478,7 +483,7 @@ def test_two_week_fallback_round_trip_and_neighboring_booking_revalidation(clien
     race = client.post(
         "/api/sessions",
         json={
-            "day": "2026-10-19",
+            "day": "2026-11-02",
             "activity": "race",
         },
     ).json()
@@ -491,7 +496,7 @@ def test_two_week_fallback_round_trip_and_neighboring_booking_revalidation(clien
         "/api/sessions",
         params={
             "start": "2026-10-05",
-            "end": "2026-10-19",
+            "end": "2026-11-02",
         },
     ).json() == [race]
     # The unaffected Monday run can still be accepted on its own.
@@ -508,6 +513,7 @@ def test_two_week_fallback_round_trip_and_neighboring_booking_revalidation(clien
 
 
 def test_new_neighboring_run_invalidates_hike_preview(client):
+    """New neighboring run invalidates hike preview."""
     request = {"week_start": "2026-10-05"}
     preview = client.post("/api/proposals", json=request).json()
     hike = next(s for s in preview if s["activity"] == "hike")
@@ -540,7 +546,8 @@ def test_new_neighboring_run_invalidates_hike_preview(client):
 
 
 def test_horizon_cannot_be_shrunk_to_accept_an_outside_proposal(client):
-    request = {"week_start": "2026-10-05", "weeks": 2}
+    """Horizon cannot be shrunk to accept an outside proposal."""
+    request = {"week_start": "2026-10-05", "weeks": 4}
     preview = client.post("/api/proposals", json=request).json()
     outside = next(s for s in preview if s["day"] >= "2026-10-12")
     outside.pop("id")
@@ -553,16 +560,17 @@ def test_horizon_cannot_be_shrunk_to_accept_an_outside_proposal(client):
                 "proposals": [outside],
             },
         ).status_code
-        == 409
+        == 422
     )
 
 
 def test_future_deferred_run_survives_midnight_after_preferred_sunday(
     client, planning_clock
 ):
+    """Future deferred run survives midnight after preferred sunday."""
     request = {
         "week_start": "2026-10-05",
-        "weeks": 2,
+        "weeks": 4,
         "blocked": ["2026-10-10", "2026-10-11"],
     }
     preview = client.post("/api/proposals", json=request).json()
@@ -583,13 +591,13 @@ def test_acceptance_order_preserves_remaining_suggestions(
 ) -> None:
     """Accepting unchanged proposals preserves every remaining suggestion.
 
-    A two-week preview contains a Saturday hike, a shortened Monday easy run,
+    A four-week preview contains a Saturday hike, a shortened Monday easy run,
     and a deferred Tuesday long run. Compare batch acceptance with accepting
     Monday first and with accepting each item in either chronological order.
     Regeneration must only remove saved items, and the original remaining
     proposals must still pass acceptance without being moved or rewritten.
     """
-    request = {"week_start": "2026-10-05", "weeks": 2}
+    request = {"week_start": "2026-10-05", "weeks": 4}
     response = client.post("/api/proposals", json=request)
     assert response.status_code == 200
     preview = response.json()
@@ -607,25 +615,31 @@ def test_acceptance_order_preserves_remaining_suggestions(
         ordered = list(reversed(preview)) if acceptance_order == "reverse" else preview
         batches = [[s] for s in ordered]
 
-    accepted_days: set[str] = set()
+    accepted_keys: set[tuple[str, str]] = set()
     for batch in batches:
         selected = [{k: v for k, v in s.items() if k != "id"} for s in batch]
         accepted = client.post(
             "/api/proposals/accept", json={**request, "proposals": selected}
         )
         assert accepted.status_code == 201, accepted.text
-        accepted_days.update(s["day"] for s in batch)
+        accepted_keys.update((s["day"], s["activity"]) for s in batch)
         regenerated = client.post("/api/proposals", json=request)
         assert regenerated.status_code == 200
         assert regenerated.json() == [
-            s for s in preview if s["day"] not in accepted_days
+            s for s in preview if (s["day"], s["activity"]) not in accepted_keys
         ]
 
     saved = client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-18"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     )
     assert saved.status_code == 200
-    assert [{**s, "id": None} for s in saved.json()] == preview
+    assert (
+        sorted(
+            [{**s, "id": None} for s in saved.json()],
+            key=lambda s: (s["day"], s["activity"]),
+        )
+        == preview
+    )
 
 
 @pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
@@ -643,7 +657,7 @@ def test_delete_session_persists_and_preserves_other_entries(client, status):
     assert response.status_code == 204
     assert response.content == b""
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [other]
     assert client.delete(f"/api/sessions/{saved['id']}").status_code == 404
 
@@ -657,7 +671,7 @@ def test_delete_missing_session_preserves_calendar(client):
     assert response.status_code == 404
     assert response.json() == {"detail": "Session 9999 does not exist"}
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [saved]
 
 
@@ -702,7 +716,7 @@ def test_update_session_preserves_identity_and_other_entries(client, status):
     updated = {**replacement, "id": original["id"]}
     assert response.json() == updated
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-18"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [other, updated]
 
 
@@ -769,7 +783,7 @@ def test_invalid_update_preserves_saved_record(client, change):
     )
     assert response.status_code == 422
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [original]
 
 
@@ -782,7 +796,7 @@ def test_update_missing_session_does_not_insert(client):
     assert response.json() == {"detail": "Session 9999 does not exist"}
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == []
     )
@@ -796,7 +810,8 @@ def test_editing_accepted_workout_invalidates_stale_suggestions(client):
     """
     request = {"week_start": "2026-10-05"}
     preview = client.post("/api/proposals", json=request).json()
-    first, second = [{k: v for k, v in s.items() if k != "id"} for s in preview[:2]]
+    same_type = [s for s in preview if s["activity"] == "gym"]
+    first, second = [{k: v for k, v in s.items() if k != "id"} for s in same_type[:2]]
     saved = client.post(
         "/api/proposals/accept", json={**request, "proposals": [first]}
     ).json()[0]
@@ -812,7 +827,7 @@ def test_editing_accepted_workout_invalidates_stale_suggestions(client):
         == 409
     )
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [edited.json()]
 
 
@@ -840,7 +855,7 @@ def test_status_changes_preserve_details_identity_and_other_records(client):
         assert response.status_code == 200
         assert response.json() == {**saved, "status": status}
         assert client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json() == [{**saved, "status": status}, other]
 
 
@@ -862,7 +877,7 @@ def test_invalid_status_change_keeps_original_workout(client, payload):
     response = client.patch(f"/api/sessions/{saved['id']}/status", json=payload)
     assert response.status_code == 422
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [saved]
 
 
@@ -873,7 +888,7 @@ def test_status_change_missing_workout_returns_404(client):
     assert response.json() == {"detail": "Session 9999 does not exist"}
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == []
     )
@@ -908,7 +923,7 @@ def test_confirmed_workouts_remain_booked_and_preserved_during_planning(client):
     assert (
         confirmed
         in client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
     )
 
@@ -926,10 +941,12 @@ def test_moved_draft_is_reserved_without_saving_and_can_be_accepted(client):
     recalculated = response.json()
     assert {**moved, "id": None} in recalculated
     assert all(item["day"] != "2026-10-06" for item in recalculated)
-    assert len({item["day"] for item in recalculated}) == len(recalculated)
+    assert len({(item["day"], item["activity"]) for item in recalculated}) == len(
+        recalculated
+    )
     assert (
         client.get(
-            "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+            "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
         ).json()
         == []
     )
@@ -997,8 +1014,8 @@ def test_draft_move_can_be_accepted_without_recalculating(client):
     ("destination", "original", "status", "blocked"),
     [
         ("2026-10-04", "2026-10-06", "planned", []),
-        ("2026-10-12", "2026-10-06", "planned", []),
-        ("2026-10-08", "2026-10-12", "planned", []),
+        ("2026-11-02", "2026-10-06", "planned", []),
+        ("2026-10-08", "2026-11-02", "planned", []),
         ("2026-10-08", "2026-10-06", "completed", []),
         ("2026-10-08", "2026-10-06", "confirmed", []),
         ("2026-10-08", "2026-10-06", "planned", ["2026-10-08"]),
@@ -1058,7 +1075,7 @@ def test_intervening_booking_rejects_moved_draft_batch_atomically(client):
     )
     assert response.status_code == 409
     assert client.get(
-        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-11"}
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
     ).json() == [booking]
 
 
@@ -1095,7 +1112,10 @@ def test_replanning_accounts_for_workload_of_unsaved_moved_drafts(client):
     assert any(
         item["day"] == "2026-10-09" and item["activity"] == "hike" for item in proposals
     )
-    assert all(item["activity"] != "long_run" for item in proposals)
+    assert all(
+        item["activity"] != "long_run" or item["day"] > "2026-10-11"
+        for item in proposals
+    )
     assert all(item["day"] != "2026-10-10" for item in proposals)
 
 
@@ -1133,3 +1153,100 @@ def test_dismissed_date_can_receive_an_explicit_draft_move(client):
     )
     assert response.status_code == 200, response.text
     assert any(item["day"] == "2026-10-08" for item in response.json())
+
+
+@pytest.mark.parametrize(
+    "targets",
+    [
+        {"gym": -1},
+        {"gym": 8},
+        {"runs": 8},
+        {"runs": 1.5},
+        {"gym": True},
+        {"runs": 0, "intervals": 1},
+        {"intervals": 3},
+        {"unexpected": 1},
+    ],
+)
+def test_invalid_training_targets_rejected_at_both_endpoints(client, targets):
+    """Generation and acceptance reject invalid counts and inconsistent run mixes."""
+    request = {"week_start": "2026-10-05", "targets": targets}
+    assert client.post("/api/proposals", json=request).status_code == 422
+    assert (
+        client.post(
+            "/api/proposals/accept", json={**request, "proposals": []}
+        ).status_code
+        == 422
+    )
+
+
+def test_same_day_proposals_can_be_confirmed_independently(client):
+    """Confirming the gym draft leaves a same-day easy run available for acceptance."""
+    request = {
+        "week_start": "2026-10-05",
+        "targets": {"gym": 1, "runs": 1, "intervals": 0},
+        "blocked": [
+            (date(2026, 10, 5) + timedelta(days=i)).isoformat()
+            for i in range(28)
+            if i % 7 != 0
+        ],
+    }
+    preview = client.post("/api/proposals", json=request).json()
+    same_day = [s for s in preview if s["day"] == "2026-10-05"]
+    assert {s["activity"] for s in same_day} == {"gym", "easy_run"}
+    for draft in same_day:
+        proposal = {k: v for k, v in draft.items() if k != "id"}
+        response = client.post(
+            "/api/proposals/accept",
+            json={**request, "proposals": [proposal], "confirm": True},
+        )
+        assert response.status_code == 201, response.text
+    saved = client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-05"}
+    ).json()
+    assert {s["activity"] for s in saved} == {"gym", "easy_run"}
+    assert all(s["status"] == "confirmed" for s in saved)
+
+
+def test_same_day_draft_moves_have_separate_origins_and_destinations(client):
+    """Two workout types can share original and moved dates without identity clashes."""
+    moves = [
+        {
+            "original_day": "2026-10-05",
+            "session": {"day": "2026-10-08", "activity": activity},
+        }
+        for activity in ("gym", "easy_run")
+    ]
+    request = {"week_start": "2026-10-05", "moves": moves}
+    response = client.post("/api/proposals", json=request)
+    assert response.status_code == 200, response.text
+    pinned = [s for s in response.json() if s["day"] == "2026-10-08"]
+    assert {s["activity"] for s in pinned} == {"gym", "easy_run"}
+    proposals = [{k: v for k, v in s.items() if k != "id"} for s in pinned]
+    accepted = client.post(
+        "/api/proposals/accept", json={**request, "proposals": proposals}
+    )
+    assert accepted.status_code == 201, accepted.text
+
+
+def test_excluding_one_same_day_draft_preserves_the_other(client):
+    """Per-workout exclusions never turn the whole date into an unavailable day."""
+    request = {
+        "week_start": "2026-10-05",
+        "targets": {"gym": 1, "runs": 1},
+        "blocked": [
+            (date(2026, 10, 5) + timedelta(days=i)).isoformat()
+            for i in range(28)
+            if i % 7 != 0
+        ],
+        "excluded": [{"day": "2026-10-05", "activity": "easy_run"}],
+    }
+    preview = client.post("/api/proposals", json=request).json()
+    first_day = [s for s in preview if s["day"] == "2026-10-05"]
+    assert len(first_day) == 1
+    assert first_day[0]["activity"] == "gym"
+    proposal = {k: v for k, v in first_day[0].items() if k != "id"}
+    accepted = client.post(
+        "/api/proposals/accept", json={**request, "proposals": [proposal]}
+    )
+    assert accepted.status_code == 201, accepted.text

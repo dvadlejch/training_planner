@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from training_planner.domain.models import Activity, Session, Status
+from training_planner.domain.models import Activity, Session, Status, TrainingTargets
 from training_planner.domain.running import recovery_days, workload_duration
 
 
@@ -33,59 +33,130 @@ def recovery_conflict(candidate: Session, other: Session) -> bool:
     )
 
 
+PLANNING_DAYS = 28
+RUN_ACTIVITIES = {activity for activity in Activity if activity.value.endswith("_run")}
+RUN_ACTIVITIES.add(Activity.RACE)
+
+
 def suggest_week(
     week_start: date,
     existing: list[Session],
     blocked: set[date] | None = None,
     *,
     not_before: date,
-    weeks: int = 1,
+    targets: TrainingTargets = TrainingTargets(),
+    excluded: set[tuple[date, Activity]] | None = None,
 ) -> list[Session]:
-    """Plan a rolling 7-28 days from any start date while preserving bookings.
+    """Fill soft targets over four seven-day periods without changing saved work.
 
-    Hikes keep their Saturday slot. Long runs prefer Sunday, then search the next
-    six days within the requested horizon. Reserve endurance before default gym
-    and Monday easy sessions. Long-run suggestions stay at least seven days apart
-    from saved or proposed long runs, avoiding deferred runs piling up.
+    Periods start on the requested date, avoiding partial-week catch-up quotas.
+    Keep the starter Saturday hikes and Sunday/fallback long runs where feasible.
+    Targets include planned, confirmed and completed sessions. Skipped work does
+    not occupy capacity or satisfy targets. Automatic pairing is limited to an
+    ordinary gym session and an easy/recovery run, with at most two items a day.
+    Manual entries and explicit draft moves remain under the user's control.
     """
-    if not 1 <= weeks <= 4:
-        raise ValueError("weeks must be between 1 and 4")
-    end = week_start + timedelta(days=7 * weeks - 1)
-    first_monday = week_start - timedelta(days=week_start.weekday())
-    mondays = [
-        first_monday + timedelta(days=offset)
-        for offset in range(0, (end - first_monday).days + 1, 7)
-    ]
-    occupied = {s.day for s in existing} | (blocked or set())
+    end = week_start + timedelta(days=PLANNING_DAYS - 1)
+    blocked = blocked or set()
+    excluded = excluded or set()
+    active = [s for s in existing if s.status != Status.SKIPPED]
     proposals: list[Session] = []
+    periods = [week_start + timedelta(days=offset) for offset in range(0, 28, 7)]
 
-    def available(day: date) -> bool:
-        return max(week_start, not_before) <= day <= end and day not in occupied
+    def load() -> list[Session]:
+        return active + proposals
+
+    def in_period(session: Session, start: date) -> bool:
+        return start <= session.day < start + timedelta(days=7)
+
+    def count(start: date, activities: set[Activity]) -> int:
+        return sum(in_period(s, start) and s.activity in activities for s in load())
+
+    def period_for(day: date) -> date:
+        return week_start + timedelta(days=((day - week_start).days // 7) * 7)
 
     def add(session: Session) -> bool:
-        if not available(session.day):
+        day = session.day
+        if (
+            not max(week_start, not_before) <= day <= end
+            or day in blocked
+            or (day, session.activity) in excluded
+        ):
+            return False
+        others = [s for s in load() if s.day == day]
+        if others:
+            # Same-day suggestions are limited to a light run plus ordinary gym.
+            pair = {session.activity, others[0].activity}
+            if (
+                len(others) >= 2
+                or len(pair) != 2
+                or Activity.GYM not in pair
+                or not pair & {Activity.EASY_RUN, Activity.RECOVERY_RUN}
+                or any(recovery_days(s) for s in [session, *others])
+            ):
+                return False
+        if session.activity != Activity.GYM and any(
+            recovery_conflict(session, s) for s in load()
+        ):
             return False
         proposals.append(session)
-        occupied.add(session.day)
         return True
 
-    # All hikes are reserved first, including later weeks, so fallback runs
-    # cannot force a hike onto a weekday or conflict with another proposal.
-    for monday in mondays:
-        hike = Session(
-            monday + timedelta(days=5),
-            Activity.HIKE,
-            duration_min=180,
-            notes="Long hike; counts as demanding endurance.",
+    def ranked_days(start: date, weekdays: tuple[int, ...]) -> list[date]:
+        return sorted(
+            (start + timedelta(days=i) for i in range(7)),
+            key=lambda day: weekdays.index(day.weekday()),
         )
-        if not any(recovery_conflict(hike, s) for s in existing + proposals):
-            add(hike)
 
-    for monday in mondays:
-        sunday = monday + timedelta(days=6)
+    # Preserve weekend outdoors, while checking all neighboring saved workload.
+    for offset in range(PLANNING_DAYS):
+        day = week_start + timedelta(days=offset)
+        if day.weekday() == 5:
+            add(
+                Session(
+                    day,
+                    Activity.HIKE,
+                    duration_min=180,
+                    notes="Long hike; counts as demanding endurance.",
+                )
+            )
+
+    # Intervals are part of the run total, never an additional quota.
+    for start in periods:
+        for day in ranked_days(start, (3, 1, 2, 4, 0, 6, 5)):
+            if (
+                count(start, {Activity.INTERVAL_RUN}) >= targets.intervals
+                or count(start, RUN_ACTIVITIES) >= targets.runs
+            ):
+                break
+            add(
+                Session(
+                    day,
+                    Activity.INTERVAL_RUN,
+                    duration_min=45,
+                    hr_zone_min=4,
+                    hr_zone_max=5,
+                    notes="Interval run toward your weekly target; "
+                    "review intensity and duration.",
+                )
+            )
+
+    # A single weekly run stays easy and can pair with gym on a busy day.
+    # Keep long runs at least seven days apart across period boundaries.
+    for offset in range(PLANNING_DAYS):
+        sunday = week_start + timedelta(days=offset)
+        if sunday.weekday() != 6 or targets.runs < 2:
+            continue
         for delay in range(7):
             day = sunday + timedelta(days=delay)
-            if not available(day):
+            if day > end:
+                break
+            if count(period_for(day), RUN_ACTIVITIES) >= targets.runs:
+                continue
+            if any(
+                s.activity == Activity.LONG_RUN and abs((s.day - day).days) < 7
+                for s in load()
+            ):
                 continue
             run = Session(
                 day,
@@ -93,55 +164,38 @@ def suggest_week(
                 duration_min=45,
                 hr_zone_min=2,
                 hr_zone_max=2,
-                notes=(
-                    "Long easy Z2 run; editable starting duration, "
-                    "not a personalized long-run target."
-                )
-                + (
-                    " Moved from Sunday to an available day with recovery spacing."
-                    if delay
-                    else ""
-                ),
+                notes="Long easy Z2 run; editable starting duration, "
+                "not a personalized long-run target.",
             )
-            load = existing + proposals
-            if any(
-                s.activity == Activity.LONG_RUN
-                and s.status != Status.SKIPPED
-                and abs((s.day - day).days) < 7
-                for s in load
-            ):
-                continue
-            if not any(recovery_conflict(run, s) for s in load):
-                add(run)
+            if add(run):
                 break
 
-    for monday in mondays:
-        nearby = any(
-            abs((s.day - monday).days) < recovery_days(s) for s in existing + proposals
-        )
-        # Short easy work remains an explicit exception to the endurance buffer.
-        add(
-            Session(
-                monday,
-                Activity.EASY_RUN,
-                duration_min=20 if nearby else 30,
-                hr_zone_min=2,
-                hr_zone_max=2,
-                notes=(
-                    "Easy Z2 conversational running; "
-                    "shortened around nearby demanding training."
-                )
-                if nearby
-                else "Easy Z2 conversational running to build aerobic consistency.",
-            )
-        )
-        for offset in (1, 2, 4):
+    for start in periods:
+        for day in ranked_days(start, (0, 3, 2, 4, 1, 6, 5)):
+            if count(start, RUN_ACTIVITIES) >= targets.runs:
+                break
+            # Constant durations keep draft contents stable after partial acceptance.
+            # The existing Monday recovery exception remains data-based.
             add(
                 Session(
-                    monday + timedelta(days=offset),
-                    Activity.GYM,
-                    duration_min=75,
-                    notes="Suggested session; review before confirming",
+                    day,
+                    Activity.EASY_RUN,
+                    duration_min=20 if day.weekday() == 0 else 30,
+                    hr_zone_min=2,
+                    hr_zone_max=2,
+                    notes="Easy Z2 conversational running toward your weekly target.",
                 )
             )
-    return sorted(proposals, key=lambda s: s.day)
+        for day in ranked_days(start, (1, 2, 4, 0, 3, 6, 5)):
+            if count(start, {Activity.GYM}) >= targets.gym:
+                break
+            add(
+                Session(
+                    day,
+                    Activity.GYM,
+                    duration_min=75,
+                    notes="Gym session toward your weekly target; "
+                    "review before confirming.",
+                )
+            )
+    return sorted(proposals, key=lambda s: (s.day, s.activity.value))

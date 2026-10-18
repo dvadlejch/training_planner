@@ -51,7 +51,7 @@ async function setup(t, initial = [saved]) {
       const pinned = (body.moves ?? []).map((move) => ({ ...move.session, id: null }));
       const generated = { ...saved, id: null, status: "planned", notes: "Suggested workout" };
       return Response.json(body.moves?.length ? pinned : [generated].filter((item) =>
-        !(body.dismissed ?? []).includes(item.day) && !body.blocked.includes(item.day)));
+        !(body.excluded ?? []).some((key) => key.day === item.day && key.activity === item.activity) && !body.blocked.includes(item.day)));
     }
     if (url.pathname === "/api/proposals/accept") {
       const accepted = body.proposals.map((item, index) => ({
@@ -367,7 +367,7 @@ test("status controls are disabled during saves and inline editing", async (t) =
 });
 
 // Every month row remains present regardless of the independent proposal horizon.
-test("month is the primary view and horizon changes do not truncate it", async (t) => {
+test("month is the primary view and target changes do not truncate it", async (t) => {
   const state = await setup(t, []);
   const calendar = document.querySelector(".monthly-calendar");
   const dates = [...calendar.querySelectorAll("time")].map((item) => item.dateTime);
@@ -401,7 +401,7 @@ test("new suggestions start today regardless of the displayed month", async (t) 
   await click(document.querySelector('[aria-label="Next month"]'));
   await click(button("Generate suggestions"));
   assert.equal(state.requests.at(-1).body.week_start, "2026-03-31");
-  assert.equal(state.requests.at(-1).body.weeks, 1);
+  assert.equal(state.requests.at(-1).body.weeks, 4);
   assert.equal(document.querySelector(".monthly-calendar").getAttribute("aria-label"), "Month 2026-03");
   currentTime = new RealDate(2026, 3, 1, 12).getTime();
   await change(document.querySelector(".planning-controls select"), "4");
@@ -490,7 +490,7 @@ test("toggle unavailable days in the calendar and regenerate suggestions", async
 });
 
 // Availability follows calendar dates across navigation and planning-window changes.
-test("availability survives browsing months and changing the planning horizon", async (t) => {
+test("availability survives browsing months and changing training targets", async (t) => {
   const state = await setup(t, []);
   const nextDate = new Date();
   nextDate.setDate(15);
@@ -798,7 +798,7 @@ test("invalid suggestion drops stay in place without asking to reschedule", asyn
   await click(unavailable);
   await click(button("Generate suggestions"));
   await dropOn(target);
-  assert.match(document.querySelector('[role="alert"]').textContent, /free, available date/);
+  assert.match(document.querySelector('[role="alert"]').textContent, /available date within the 28-day horizon/);
   assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
   assert.equal(document.querySelector("dialog"), null);
   assert.deepEqual(state.sessions, []);
@@ -890,10 +890,10 @@ test("dismissed dates survive recalculation and reset for a fresh plan", async (
   assert.equal(requestsBeforeRecalculation, 1);
   await click(button("Recalculate"));
   assert.equal(state.requests.length, requestsBeforeRecalculation + 1);
-  assert.deepEqual(state.requests.at(-1).body.dismissed, [firstDay]);
+  assert.deepEqual(state.requests.at(-1).body.excluded, [{ day: firstDay, activity: "gym" }]);
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
   await click(button("Generate suggestions"));
-  assert.equal(state.requests.at(-1).body.dismissed, undefined);
+  assert.equal(state.requests.at(-1).body.excluded, undefined);
   assert.ok(document.querySelector(".calendar-card--proposal"));
 });
 
@@ -925,7 +925,7 @@ test("removing one draft keeps other suggestions and excludes its old reservatio
   await click(document.querySelector('button[aria-label^="Confirm suggestion "]'));
   const request = state.requests.at(-1);
   assert.deepEqual(request.body.moves, []);
-  assert.deepEqual(request.body.dismissed, [removedDay, origin]);
+  assert.deepEqual(request.body.excluded, [{ day: removedDay, activity: "gym" }, { day: origin, activity: "gym" }]);
   assert.equal(request.body.proposals.length, 1);
   assert.equal(request.body.proposals[0].day, remainingDay);
 });
@@ -962,12 +962,12 @@ test("retry rescheduling after removal without restoring the dismissed suggestio
   assert.match(document.querySelector("dialog").textContent, /Cannot save right now/);
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
   assert.deepEqual(state.sessions, [saved]);
-  assert.deepEqual(state.requests.at(-1).body.dismissed, [firstDay]);
+  assert.deepEqual(state.requests.at(-1).body.excluded, [{ day: firstDay, activity: "gym" }]);
   state.fail = "";
   await click(button("Recalculate"));
   assert.equal(document.querySelector("dialog"), null);
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
-  assert.deepEqual(state.requests.at(-1).body.dismissed, [firstDay]);
+  assert.deepEqual(state.requests.at(-1).body.excluded, [{ day: firstDay, activity: "gym" }]);
   assert.deepEqual(state.sessions, [saved]);
 });
 
@@ -1073,6 +1073,71 @@ test("confirm suggestions individually and drop accepted move metadata", async (
   assert.equal(state.sessions.length, 2);
   assert.equal(state.requests.at(-1).body.proposals.length, 1);
   assert.deepEqual(state.requests.at(-1).body.moves, []);
-  assert.ok(state.requests.at(-1).body.dismissed.includes(origin));
+  assert.ok(state.requests.at(-1).body.excluded.some((key) => key.day === origin && key.activity === "gym"));
   assert.equal(document.querySelector(".calendar-card--proposal"), null);
+});
+
+
+// Target changes keep intervals within total runs and send a snapshot with every plan.
+test("simple training targets replace the horizon selector", async (t) => {
+  const state = await setup(t, []);
+  const gym = document.querySelector('[aria-label="Gym sessions per week"]');
+  const runs = document.querySelector('[aria-label="Runs per week"]');
+  const intervals = document.querySelector('[aria-label="Interval runs (included in total)"]');
+  assert.equal(gym.value, "3");
+  assert.equal(runs.value, "2");
+  assert.equal(intervals.value, "0");
+  assert.doesNotMatch(document.querySelector(".planning-controls").textContent, /Planning horizon/);
+  await change(gym, "2");
+  await change(runs, "3");
+  await change(intervals, "1");
+  await click(button("Generate suggestions"));
+  assert.equal(state.requests.at(-1).body.weeks, 4);
+  assert.deepEqual(state.requests.at(-1).body.targets, { gym: 2, runs: 3, intervals: 1 });
+  await change(runs, "0");
+  assert.equal(intervals.value, "0");
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.targets, { gym: 2, runs: 0, intervals: 0 });
+});
+
+// Moving, removing and confirming use both activity and date when drafts share a day.
+test("same-day draft actions preserve separate workout identities", async (t) => {
+  const { state, origin, target } = await prepareDraft(t);
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (path, options) => {
+    const response = await originalFetch(path, options);
+    if (path === "/api/proposals" && !JSON.parse(options.body).moves?.length && response.ok) {
+      return Response.json([
+        { ...saved, id: null, day: origin, status: "planned", activity: "gym" },
+        { ...saved, id: null, day: origin, status: "planned", activity: "easy_run" },
+      ]);
+    }
+    return response;
+  });
+  await click(button("Generate suggestions"));
+  while (!dayCell(origin)) await click(document.querySelector('[aria-label="Next month"]'));
+  const handles = () => [...dayCell(origin).querySelectorAll(".calendar-drag-handle")];
+  await click(handles()[1]);
+  await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
+  await click(button("Move suggestion"));
+  await click(button("Keep current suggestions"));
+  await click(handles()[0]);
+  await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
+  await click(button("Move suggestion"));
+  await click(button("Recalculate"));
+  const request = state.requests.at(-1).body;
+  assert.equal(request.moves.length, 2);
+  assert.deepEqual(request.moves.map((move) => move.session.activity), ["easy_run", "gym"]);
+  assert.equal(dayCell(target).querySelectorAll(".calendar-card--proposal").length, 2);
+  await click(dayCell(target).querySelector('button[aria-label*="Remove suggestion"][aria-label$="Easy run"]'));
+  await click(button("Keep current suggestions"));
+  await click(dayCell(target).querySelector('button[aria-label^="Confirm suggestion"]'));
+  assert.equal(state.requests.at(-1).body.moves.length, 1);
+  assert.equal(state.requests.at(-1).body.moves[0].session.activity, "gym");
+  assert.equal(state.sessions[0].activity, "gym");
+  assert.equal(state.sessions[0].day, target);
+  assert.deepEqual(state.requests.at(-1).body.excluded, [
+    { day: target, activity: "easy_run" }, { day: origin, activity: "easy_run" },
+  ]);
 });
