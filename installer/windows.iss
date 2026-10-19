@@ -17,6 +17,10 @@ OutputBaseFilename=TrainingPlanner-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\icons\summit-calendar.ico
+WizardImageFile=..\assets\icons\installer-panel.png
+WizardSmallImageFile=..\assets\icons\summit-calendar.png
+DisableWelcomePage=no
 UninstallDisplayIcon={app}\TrainingPlanner.exe
 CloseApplications=yes
 RestartApplications=no
@@ -31,13 +35,21 @@ Source: "..\dist\TrainingPlanner\TrainingPlanner.exe"; DestDir: "{app}"; Flags: 
 Source: "..\dist\TrainingPlanner\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{userprograms}\Training Planner"; Filename: "{app}\TrainingPlanner.exe"; Tasks: startmenuicon
-Name: "{userdesktop}\Training Planner"; Filename: "{app}\TrainingPlanner.exe"; Tasks: desktopicon
+Name: "{userprograms}\Training Planner"; Filename: "{app}\TrainingPlanner.exe"; IconFilename: "{app}\TrainingPlanner.exe"; IconIndex: 0; Tasks: startmenuicon
+Name: "{userdesktop}\Training Planner"; Filename: "{app}\TrainingPlanner.exe"; IconFilename: "{app}\TrainingPlanner.exe"; IconIndex: 0; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\TrainingPlanner.exe"; Description: "Launch Training Planner"; Flags: postinstall nowait skipifsilent unchecked
 
 [Code]
+const
+  SHCNE_ASSOCCHANGED = $08000000;
+  SHCNF_IDLIST = $0000;
+  SHCNF_FLUSHNOWAIT = $2000;
+
+procedure SHChangeNotify(EventId: Integer; Flags: Cardinal; Item1, Item2: LongWord);
+external 'SHChangeNotify@shell32.dll stdcall';
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
@@ -49,6 +61,9 @@ begin
       RaiseException('Could not initialize the Training Planner database.');
     if ResultCode <> 0 then
       RaiseException('Database initialization failed. Choose a writable destination folder.');
+    { Replacing an EXE at the same path can leave Explorer's old icon cached.
+      Ask the Shell to invalidate its icon cache without restarting Explorer. }
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST or SHCNF_FLUSHNOWAIT, 0, 0);
   end;
 end;
 

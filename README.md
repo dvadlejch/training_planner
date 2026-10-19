@@ -415,6 +415,11 @@ The SQLite database is created locally at `data/training.db` on the first sessio
 
 ## Windows application and installer builds
 
+Icon designs and editable sources are in [assets/icons](assets/icons/README.md).
+The default Summit Calendar icon is embedded in the app and installer executables,
+used by app shortcuts and the browser tab, and displayed inside the installation wizard.
+Rebuild the installer below to include these assets.
+
 Windows packaging is separate from the two-server development workflow above.
 The packaged application serves the built React interface and API together on
 `http://127.0.0.1:8765`, and opens your default browser after startup. A console

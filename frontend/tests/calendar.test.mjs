@@ -690,6 +690,36 @@ test("protected workout moves can be cancelled without saving or losing previews
 });
 
 
+// Navigate by the displayed month, since padding dates may also be present.
+async function showMonth(day) {
+  const calendar = document.querySelector(".monthly-calendar");
+  const current = calendar.getAttribute("aria-label").slice(-7);
+  const [currentYear, currentMonth] = current.split("-").map(Number);
+  const [targetYear, targetMonth] = day.slice(0, 7).split("-").map(Number);
+  const offset = (targetYear - currentYear) * 12 + targetMonth - currentMonth;
+  const direction = offset < 0 ? "Previous month" : "Next month";
+  for (let step = 0; step < Math.abs(offset); step += 1) {
+    await click(document.querySelector(`[aria-label="${direction}"]`));
+  }
+  assert.equal(calendar.getAttribute("aria-label"), `Month ${day.slice(0, 7)}`);
+}
+
+// Fixed Mondays exercise drafts in the same month, the next month and next year.
+const draftCalendarCases = [
+  { label: "same month", today: "2026-10-05", origin: "2026-10-19" },
+  { label: "month rollover", today: "2026-10-19", origin: "2026-11-02" },
+  { label: "year rollover", today: "2026-12-21", origin: "2027-01-04" },
+];
+
+function freezeDate(t, day) {
+  const RealDate = Date;
+  const now = new RealDate(`${day}T12:00:00`).getTime();
+  t.mock.method(globalThis, "Date", class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  });
+}
+
 async function prepareDraft(t) {
   const state = await setup(t, []);
   const today = new Date();
@@ -709,9 +739,7 @@ async function prepareDraft(t) {
   });
   await change(document.querySelector('.planning-controls select'), "4");
   await click(button("Generate suggestions"));
-  while (document.querySelector('.monthly-calendar').getAttribute('aria-label') !== `Month ${origin.slice(0, 7)}`) {
-    await click(document.querySelector('[aria-label="Next month"]'));
-  }
+  await showMonth(origin);
   const targetDate = new Date(`${origin}T12:00:00`);
   targetDate.setDate(targetDate.getDate() + 1);
   return { state, origin, target: dateString(targetDate) };
@@ -790,19 +818,24 @@ test("planned moves skip approval and recalculate only after the dialog choice",
   assert.equal(document.querySelector("dialog"), null);
 });
 
-// Draft destinations must remain free and within the planning horizon and availability.
-test("invalid suggestion drops stay in place without asking to reschedule", async (t) => {
-  const { state, origin, target } = await prepareDraft(t);
-  await click(button("Dismiss all"));
-  const unavailable = document.querySelector(`input[aria-label="Unavailable for suggestions on ${target}"]`);
-  await click(unavailable);
-  await click(button("Generate suggestions"));
-  await dropOn(target);
-  assert.match(document.querySelector('[role="alert"]').textContent, /available date within the 28-day horizon/);
-  assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
-  assert.equal(document.querySelector("dialog"), null);
-  assert.deepEqual(state.sessions, []);
-});
+for (const scenario of draftCalendarCases) {
+  // Draft destinations must remain free and within the planning horizon and availability.
+  test(`invalid suggestion drops stay in place without asking to reschedule (${scenario.label})`, async (t) => {
+    freezeDate(t, scenario.today);
+    const { state, origin, target } = await prepareDraft(t);
+    assert.equal(origin, scenario.origin);
+    await click(button("Dismiss all"));
+    const unavailable = document.querySelector(`input[aria-label="Unavailable for suggestions on ${target}"]`);
+    await click(unavailable);
+    await click(button("Generate suggestions"));
+    await showMonth(origin);
+    await dropOn(target);
+    assert.match(document.querySelector('[role="alert"]').textContent, /available date within the 28-day horizon/);
+    assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
+    assert.equal(document.querySelector("dialog"), null);
+    assert.deepEqual(state.sessions, []);
+  });
+}
 
 // Keyboard users can reposition a suggestion through the move handle's date form.
 test("suggestion handle offers date editing without saving the draft", async (t) => {
@@ -1101,46 +1134,50 @@ test("simple training targets replace the horizon selector", async (t) => {
   assert.deepEqual(state.requests.at(-1).body.targets, { gym: 2, runs: 0, intervals: 0 });
 });
 
-// Moving, removing and confirming use both activity and date when drafts share a day.
-test("same-day draft actions preserve separate workout identities", async (t) => {
-  const { state, origin, target } = await prepareDraft(t);
-  const originalFetch = globalThis.fetch;
-  t.mock.method(globalThis, "fetch", async (path, options) => {
-    const response = await originalFetch(path, options);
-    if (path === "/api/proposals" && !JSON.parse(options.body).moves?.length && response.ok) {
-      return Response.json([
-        { ...saved, id: null, day: origin, status: "planned", activity: "gym" },
-        { ...saved, id: null, day: origin, status: "planned", activity: "easy_run" },
-      ]);
-    }
-    return response;
+for (const scenario of draftCalendarCases) {
+  // Moving, removing and confirming use both activity and date when drafts share a day.
+  test(`same-day draft actions preserve separate workout identities (${scenario.label})`, async (t) => {
+    freezeDate(t, scenario.today);
+    const { state, origin, target } = await prepareDraft(t);
+    assert.equal(origin, scenario.origin);
+    const originalFetch = globalThis.fetch;
+    t.mock.method(globalThis, "fetch", async (path, options) => {
+      const response = await originalFetch(path, options);
+      if (path === "/api/proposals" && !JSON.parse(options.body).moves?.length && response.ok) {
+        return Response.json([
+          { ...saved, id: null, day: origin, status: "planned", activity: "gym" },
+          { ...saved, id: null, day: origin, status: "planned", activity: "easy_run" },
+        ]);
+      }
+      return response;
+    });
+    await click(button("Generate suggestions"));
+    await showMonth(origin);
+    const handles = () => [...dayCell(origin).querySelectorAll(".calendar-drag-handle")];
+    await click(handles()[1]);
+    await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
+    await click(button("Move suggestion"));
+    await click(button("Keep current suggestions"));
+    await click(handles()[0]);
+    await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
+    await click(button("Move suggestion"));
+    await click(button("Recalculate"));
+    const request = state.requests.at(-1).body;
+    assert.equal(request.moves.length, 2);
+    assert.deepEqual(request.moves.map((move) => move.session.activity), ["easy_run", "gym"]);
+    assert.equal(dayCell(target).querySelectorAll(".calendar-card--proposal").length, 2);
+    await click(dayCell(target).querySelector('button[aria-label*="Remove suggestion"][aria-label$="Easy run"]'));
+    await click(button("Keep current suggestions"));
+    await click(dayCell(target).querySelector('button[aria-label^="Confirm suggestion"]'));
+    assert.equal(state.requests.at(-1).body.moves.length, 1);
+    assert.equal(state.requests.at(-1).body.moves[0].session.activity, "gym");
+    assert.equal(state.sessions[0].activity, "gym");
+    assert.equal(state.sessions[0].day, target);
+    assert.deepEqual(state.requests.at(-1).body.excluded, [
+      { day: target, activity: "easy_run" }, { day: origin, activity: "easy_run" },
+    ]);
   });
-  await click(button("Generate suggestions"));
-  while (!dayCell(origin)) await click(document.querySelector('[aria-label="Next month"]'));
-  const handles = () => [...dayCell(origin).querySelectorAll(".calendar-drag-handle")];
-  await click(handles()[1]);
-  await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
-  await click(button("Move suggestion"));
-  await click(button("Keep current suggestions"));
-  await click(handles()[0]);
-  await change(document.querySelector('[aria-label="Move suggestion"] input'), target);
-  await click(button("Move suggestion"));
-  await click(button("Recalculate"));
-  const request = state.requests.at(-1).body;
-  assert.equal(request.moves.length, 2);
-  assert.deepEqual(request.moves.map((move) => move.session.activity), ["easy_run", "gym"]);
-  assert.equal(dayCell(target).querySelectorAll(".calendar-card--proposal").length, 2);
-  await click(dayCell(target).querySelector('button[aria-label*="Remove suggestion"][aria-label$="Easy run"]'));
-  await click(button("Keep current suggestions"));
-  await click(dayCell(target).querySelector('button[aria-label^="Confirm suggestion"]'));
-  assert.equal(state.requests.at(-1).body.moves.length, 1);
-  assert.equal(state.requests.at(-1).body.moves[0].session.activity, "gym");
-  assert.equal(state.sessions[0].activity, "gym");
-  assert.equal(state.sessions[0].day, target);
-  assert.deepEqual(state.requests.at(-1).body.excluded, [
-    { day: target, activity: "easy_run" }, { day: origin, activity: "easy_run" },
-  ]);
-});
+}
 
 
 // Gym and running weekday settings are independent and included in preview confirmation.
@@ -1178,18 +1215,22 @@ test("weekday changes clear unsaved previews without modifying saved workouts", 
   assert.deepEqual(state.requests.at(-1).body.weekdays.gym, []);
 });
 
-// Date editing cannot place an unsaved workout outside its recurring activity availability.
-test("draft date edits reject unselected weekdays", async (t) => {
-  const { state, origin, target } = await prepareDraft(t);
-  // target is Tuesday; the original draft is Monday.
-  await click(document.querySelector('[aria-label="Gym on Tue"]'));
-  await click(button("Generate suggestions"));
-  while (!dayCell(origin)) await click(document.querySelector('[aria-label="Next month"]'));
-  await click(moveHandle());
-  await change(form().elements.day, target);
-  await submit();
-  assert.match(document.querySelector('[role="alert"]').textContent, /allowed weekday/);
-  assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
-  assert.equal(document.querySelector("dialog"), null);
-  assert.deepEqual(state.sessions, []);
-});
+for (const scenario of draftCalendarCases) {
+  // Date editing cannot place an unsaved workout outside its recurring activity availability.
+  test(`draft date edits reject unselected weekdays (${scenario.label})`, async (t) => {
+    freezeDate(t, scenario.today);
+    const { state, origin, target } = await prepareDraft(t);
+    assert.equal(origin, scenario.origin);
+    // target is Tuesday; the original draft is Monday.
+    await click(document.querySelector('[aria-label="Gym on Tue"]'));
+    await click(button("Generate suggestions"));
+    await showMonth(origin);
+    await click(moveHandle());
+    await change(form().elements.day, target);
+    await submit();
+    assert.match(document.querySelector('[role="alert"]').textContent, /allowed weekday/);
+    assert.ok(dayCell(origin).querySelector(".calendar-card--proposal"));
+    assert.equal(document.querySelector("dialog"), null);
+    assert.deepEqual(state.sessions, []);
+  });
+}

@@ -86,6 +86,7 @@ try {
         'run', '--no-sync', 'pyinstaller', '--noconfirm', '--clean', '--onedir',
         '--name', 'TrainingPlanner', '--distpath', 'dist', '--workpath', 'build\pyinstaller',
         '--specpath', 'build', '--paths', "$projectRoot\src",
+        '--icon', "$projectRoot\assets\icons\summit-calendar.ico",
         '--add-data', "$projectRoot\frontend\dist;training_planner/web",
         'src\training_planner\__main__.py'
     )
