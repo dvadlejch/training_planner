@@ -13,6 +13,25 @@ export function activityStats(activity: SessionInput["activity"]) {
   };
 }
 
+/** Parse minutes or elapsed mm:ss / hh:mm:ss; NaN marks an invalid duration. */
+export function parseDuration(value: string): number | null {
+  const text = value.trim();
+  if (text === "") return null;
+  let minutes: number;
+  if (/^\d+(?:\.\d+)?$/.test(text)) {
+    minutes = Number(text);
+  } else if (/^\d+:[0-5]\d$/.test(text)) {
+    const [wholeMinutes, seconds] = text.split(":").map(Number);
+    minutes = wholeMinutes + seconds / 60;
+  } else if (/^\d+:[0-5]\d:[0-5]\d$/.test(text)) {
+    const [hours, wholeMinutes, seconds] = text.split(":").map(Number);
+    minutes = hours * 60 + wholeMinutes + seconds / 60;
+  } else {
+    return NaN;
+  }
+  return Number.isFinite(minutes) && minutes <= 1440 ? minutes : NaN;
+}
+
 /** Derive average pace from recorded total time; missing/zero inputs have no pace. */
 export function averagePace(distance: number | null, minutes: number | null): string | null {
   if (distance == null || minutes == null || distance <= 0 || minutes <= 0 ||

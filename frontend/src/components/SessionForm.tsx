@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { activities, statuses, type Session, type SessionInput } from "../api/types";
 import { activityLabel, runPresets, zoneLabel } from "../running";
-import { activityStats, averagePace } from "../sessionStats";
+import { activityStats, averagePace, parseDuration } from "../sessionStats";
 
 interface SessionFormProps {
   day: string;
@@ -36,14 +36,17 @@ export default function SessionForm({
   const completed = status === "completed";
   const stats = activityStats(activity);
   const optionalNumber = (value: string): number | null => value.trim() === "" ? null : Number(value);
-  const pace = averagePace(optionalNumber(results.distance_km), optionalNumber(results.actual_duration_min));
+  const actualDuration = parseDuration(results.actual_duration_min);
+  const durationError = actualDuration !== null && Number.isNaN(actualDuration)
+    ? "Enter minutes, mm:ss or hh:mm:ss, from 0 to 24 hours. Seconds and minutes after hours must be 00-59."
+    : "";
+  const pace = averagePace(optionalNumber(results.distance_km), actualDuration);
   // Defaults help planning but must not fabricate a plan for a directly logged result.
   const keepTargets = planning || session !== null || planEdited;
   const plannedDuration = keepTargets ? optionalNumber(duration) : null;
   const zoneMin = keepTargets && zone ? Number(zone.split("-")[0]) : null;
   const zoneMax = keepTargets && zone ? Number(zone.split("-")[1]) : null;
   const resultFields = [
-    { name: "actual_duration_min", label: "Actual duration (min)", visible: stats.duration, min: 0, max: 1440 },
     { name: "distance_km", label: "Distance (km)", visible: stats.distance, min: 0 },
     { name: "average_hr_bpm", label: "Average heart rate (bpm)", visible: stats.heartRate, min: 1, max: 300, step: 1 },
     { name: "elevation_gain_m", label: "Elevation gain (m)", visible: stats.elevation, min: 0 },
@@ -53,12 +56,13 @@ export default function SessionForm({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (durationError) return;
     const fields = new FormData(event.currentTarget);
     // Read hidden values from draft state, so changing status never clears saved data.
     await onSave({
       day: String(fields.get("day")), activity, status,
       duration_min: plannedDuration, hr_zone_min: zoneMin, hr_zone_max: zoneMax,
-      actual_duration_min: optionalNumber(results.actual_duration_min),
+      actual_duration_min: actualDuration,
       distance_km: optionalNumber(results.distance_km),
       average_hr_bpm: optionalNumber(results.average_hr_bpm),
       elevation_gain_m: optionalNumber(results.elevation_gain_m),
@@ -74,6 +78,7 @@ export default function SessionForm({
       {planning && <p>Set your training targets. All targets are optional.</p>}
       {completed && <p>Record what you did. All results are optional.</p>}
       {planning && runPresets[activity] && <p>{runPresets[activity]?.description}</p>}
+      {durationError && <p className="message error" role="alert">{durationError}</p>}
       {error && <p className="message error" role="alert">{error}</p>}
       <fieldset disabled={disabled} className="calendar-editor-fields">
         <label>Date<input name="day" type="date" defaultValue={session?.day ?? day} required autoFocus /></label>
@@ -112,6 +117,14 @@ export default function SessionForm({
             {zoneMin !== null && <p>{zoneLabel(zoneMin, zoneMax)}</p>}
           </details>}
           <h5 className="session-section-heading">Recorded results</h5>
+          {stats.duration && <label>Actual duration (min, mm:ss or hh:mm:ss)
+            <input name="actual_duration_min" type="text" placeholder="42:30 or 1:05:30"
+              aria-invalid={Boolean(durationError)} aria-describedby="actual-duration-help"
+              ref={(input) => { input?.setCustomValidity(durationError); }}
+              value={results.actual_duration_min}
+              onChange={(event) => setResults((current) => ({ ...current, actual_duration_min: event.target.value }))} />
+            <small id="actual-duration-help">Minutes or elapsed time, up to 24 hours.</small>
+          </label>}
           {resultFields.filter((field) => field.visible).map((field) => (
             <label key={field.name}>{field.label}<input name={field.name} type="number"
               min={field.min} max={field.max} step={field.step ?? "any"} value={results[field.name]}

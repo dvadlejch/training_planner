@@ -11,7 +11,7 @@ Object.assign(globalThis, {
 });
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { averagePace, sessionOverview } = await import(sourceUrl("../src/sessionStats.ts"));
+const { averagePace, sessionOverview, parseDuration } = await import(sourceUrl("../src/sessionStats.ts"));
 const { default: SessionForm } = await import(sourceUrl("../src/components/SessionForm.tsx"));
 const { default: SessionDetails } = await import(sourceUrl("../src/components/SessionDetails.tsx"));
 const session = {
@@ -208,4 +208,66 @@ test("blank result fields submit null rather than zero", async (t) => {
   assert.equal(submitted.duration_min, null);
   assert.equal(submitted.hr_zone_min, null);
   assert.equal(submitted.hr_zone_max, null);
+});
+
+// Both clock formats convert to API minutes without losing seconds or optional blanks.
+test("duration parser accepts minutes and elapsed times within 24 hours", () => {
+  for (const [text, expected] of [
+    ["", null], ["  ", null], ["0", 0], ["42.5", 42.5], ["42:30", 42.5],
+    [" 1:05:30 ", 65.5], ["00:01", 1 / 60], ["90:00", 90],
+    ["0:00:00", 0], ["1440", 1440], ["1440:00", 1440], ["24:00:00", 1440],
+  ]) assert.equal(parseDuration(text), expected, text);
+  for (const text of [
+    "1:60", "1:60:00", "1:00:60", "1:2", "1:2:03", "1:02:3", "1:02:03:04",
+    "-1", "-1:30", "1.5:30", "abc", "NaN", "Infinity", "1e3", "24:00:01",
+    "1440.01", "1440:01", "1:", ":30",
+  ]) assert.ok(Number.isNaN(parseDuration(text)), text);
+});
+
+// Editing existing results uses elapsed time for both live pace and the numeric API payload.
+test("completed duration accepts both clock formats and preserves drafts", async (t) => {
+  let submitted;
+  const host = await render(t, SessionForm, {
+    day: session.day, session, disabled: false, error: "",
+    onSave: async (value) => { submitted = value; }, onCancel: () => {},
+  });
+  const field = (name) => host.querySelector(`[name="${name}"]`);
+  await change(field("distance_km"), "5");
+  for (const [text, minutes, pace] of [["42:30", 42.5, "8:30"], ["1:05:30", 65.5, "13:06"]]) {
+    await change(field("actual_duration_min"), text);
+    assert.ok(host.textContent.includes(`Average pace: ${pace} /km`));
+    assert.equal(field("actual_duration_min").checkValidity(), true);
+    await change(field("status"), "skipped");
+    await change(field("status"), "completed");
+    assert.equal(field("actual_duration_min").value, text);
+    await act(async () => host.querySelector("form").requestSubmit());
+    assert.equal(submitted.actual_duration_min, minutes);
+  }
+});
+
+// Invalid text cannot reach saving, including when a status change hides the draft.
+test("invalid completed duration blocks saving and recovers after correction", async (t) => {
+  let saves = 0;
+  const host = await render(t, SessionForm, {
+    day: session.day, session, disabled: false, error: "",
+    onSave: async () => { saves += 1; }, onCancel: () => {},
+  });
+  const input = host.querySelector('[name="actual_duration_min"]');
+  for (const text of ["1:60", "24:00:01", "oops"]) {
+    await change(input, text);
+    assert.equal(input.checkValidity(), false);
+    assert.equal(input.getAttribute("aria-invalid"), "true");
+    assert.ok(host.querySelector('[role="alert"]').textContent.includes("00"));
+    assert.equal(host.querySelector(".session-pace"), null);
+    await act(async () => host.querySelector("form").requestSubmit());
+    assert.equal(saves, 0);
+  }
+  await change(host.querySelector('[name="status"]'), "skipped");
+  await act(async () => host.querySelector("form").requestSubmit());
+  assert.equal(saves, 0);
+  await change(host.querySelector('[name="status"]'), "completed");
+  await change(host.querySelector('[name="actual_duration_min"]'), "00:01");
+  assert.equal(host.querySelector('[role="alert"]'), null);
+  await act(async () => host.querySelector("form").requestSubmit());
+  assert.equal(saves, 1);
 });
