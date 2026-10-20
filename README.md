@@ -88,8 +88,10 @@ and multiline workout notes for exercises, weights and repetitions. Structured
 exercise/set records and performance trends remain planned. Gym sessions support optional
 muscle-group selection: Chest, Legs and Back (large groups), Biceps, Triceps and
 Shoulders (small groups), plus Abs. Select any combination when adding or editing
-a gym workout; selections are saved and shown in its details. Automatic gym
-rotation and muscle-specific recovery rules remain planned.
+a gym workout; selections are saved and shown on calendar cards and in details.
+Generated gym sessions also use a configurable muscle split (see below).
+Leg targets now use the calendar spacing rule described below. Personalized
+load estimates and recovery adaptation remain planned.
 
 ## 6. Optional fitness and recovery information
 
@@ -239,7 +241,7 @@ inside the 28-day horizon and today or later. A second draft or active saved wor
 - Deterministic **28-day, day-level rules** with gym/running targets, optional interval runs, weekend hikes and flexible long-run dates.
 - Unit tests for the planner/storage and integration tests for API validation, proposal preservation and transactional acceptance.
 
-**Not yet implemented:** the daypart calendar, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or automatically select the best rotation of gym muscle groups.
+**Not yet implemented:** the daypart calendar, exact times, spanning/multi-day items, persisted availability or non-training commitments, distinct proposal/accepted locks, detailed metrics, optional readiness inputs, goal-priority settings, intelligent recovery/load adaptation, personalized VO2 max progression, integrations, or performance dashboards. The current rule engine uses preferred weekdays with flexible long-run dates, excludes elapsed dates and does **not** account for time-block availability or estimate individual recovery. Gym suggestions use the configurable rotation and leg/endurance spacing described below.
 
 
 ### Training targets, allowed weekdays and multiple daily events
@@ -304,9 +306,66 @@ manual saved-workout entry remains under the user's control.
 Saturday hike suggestions remain independent and may occupy a selected gym day;
 their count and recurring weekdays are not configurable yet.
 
-Named running modes, personalized progression, cross-period gym carryover,
-gym workout rotation, persisted preferences and exact-time/daypart conflicts
-remain planned.
+### Gym muscle-group planning
+
+The **Gym muscle-group split** settings rotate the primary groups **Chest, Back and
+Legs** across suggested gym sessions, continuing across weeks. Leg/endurance
+spacing can adjust this order. For each primary
+row, select any combination of **Biceps, Triceps, Shoulders and Abs**, or leave
+all accessories unchecked. The defaults are Chest + Shoulders + Abs,
+Back + Triceps + Abs, and Legs + Biceps + Abs. For example, you can instead set
+Chest + Biceps, Back + Shoulders and Legs + Triceps. Abs is optional per row.
+These settings reset on page reload, like the other suggestion settings.
+Changing the split clears unsaved suggestions and leaves saved workouts intact.
+
+Rotation follows session dates rather than fixed weekdays. Known primary targets
+on saved planned, confirmed and completed gym sessions count toward the rotation.
+The last workout for each primary group is loaded even when it predates the
+neighboring recovery window, so deferred legs retain priority after a break.
+Skipped, unspecified and accessory-only gyms do not advance the rotation.
+Trained primary groups move to the back of the rotation; a saved workout with
+several primary groups updates each one in Chest/Back/Legs order.
+Saved and explicitly moved workouts retain their exact muscle targets.
+Confirming suggestions individually in either order preserves the remaining
+targets; recalculating or generating a fresh plan may change them.
+
+Automatic suggestions leave **at least one full intervening calendar day**
+between a gym session with **Legs** selected and **any hike, any cycling session,
+or a demanding run**. Demanding runs use the existing classification: hard-run
+categories (intervals, tempo, hard endurance and races), target HR Z4-5, RPE 7+
+or running duration of at least 90 minutes. Completed runs use recorded duration
+when present. Ordinary easy/recovery runs remain compatible with leg training.
+The leg rule applies in both directions, including saved work just outside the
+horizon; skipped entries do not constrain suggestions.
+
+When possible, leg targets move forward to a safe gym date before the rotation
+would place them beside endurance (for example, Thursday instead of Friday
+before a Saturday hike). Otherwise an upper-body target fills the gym slot and
+legs remain pending for the next safe date. Existing endurance priorities and
+allowed gym dates are preserved, so a busy horizon can contain fewer leg sessions.
+This is a calendar heuristic based on selected muscles, not an estimate of
+exercise load or a personalized recovery prescription. Existing endurance
+buffers continue to apply. Manual saved entries and explicit draft moves remain
+under the user's control and can override spacing; automatic generation and
+acceptance recheck new suggestions around them.
+
+The API accepts optional `gym_split` on generation and acceptance:
+```json
+{
+  "week_start": "2026-10-18",
+  "gym_split": {
+    "chest": ["biceps"],
+    "back": ["shoulders"],
+    "legs": ["triceps", "abs"]
+  }
+}
+```
+Omitted rows use the defaults; an empty row means primary-only training.
+Rows accept only unique accessory names. Use the same `gym_split` when accepting
+or recalculating a preview. Suggested session responses carry `muscle_groups`.
+
+Named running modes, personalized progression, persisted preferences and
+exact-time/daypart conflicts remain planned.
 
 ## 11. Technical architecture
 
@@ -577,8 +636,9 @@ Saved and proposed long runs stay at least seven days apart to avoid piling up d
 If no eligible date exists, the suggestion is omitted. Only today and later dates are proposed.
 Blocked days cannot receive training but still count toward recovery in calendar days.
 Acceptance rechecks the whole horizon and neighboring saved work in one transaction.
-Accepted sessions are preserved. Generic gym entries
-cannot identify heavy leg training yet, so that conflict still needs manual review.
+Accepted sessions are preserved. Selecting Legs on gym workouts activates the
+additional one-full-day spacing from hikes, cycling and demanding runs described
+above; unspecified gym muscle targets still have unknown leg load.
 
 Sources consulted:
 - [Polar endurance zones](https://www.polar.com/us-en/guide/endurance-training)

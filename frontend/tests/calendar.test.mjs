@@ -49,7 +49,9 @@ async function setup(t, initial = [saved]) {
     if (state.fail === method) return Response.json({ detail: "Cannot save right now" }, { status: 503 });
     if (url.pathname === "/api/proposals") {
       const pinned = (body.moves ?? []).map((move) => ({ ...move.session, id: null }));
-      const generated = { ...saved, id: null, status: "planned", notes: "Suggested workout" };
+      const generated = { ...saved, id: null, status: "planned", notes: "Suggested workout",
+        muscle_groups: ["chest", ...(body.gym_split?.chest ?? ["shoulders", "abs"])],
+      };
       return Response.json(body.moves?.length ? pinned : [generated].filter((item) =>
         !(body.excluded ?? []).some((key) => key.day === item.day && key.activity === item.activity) && !body.blocked.includes(item.day)));
     }
@@ -1237,3 +1239,56 @@ for (const scenario of draftCalendarCases) {
     assert.deepEqual(state.sessions, []);
   });
 }
+
+
+// Split settings start with the agreed defaults and allow the user's example combinations.
+test("custom gym split reaches generation, recalculation and confirmation", async (t) => {
+  const state = await setup(t, []);
+  const checkbox = (primary, group) => document.querySelector(`[aria-label="${primary} with ${group}"]`);
+  assert.ok(checkbox("Chest", "Shoulders").checked);
+  assert.ok(checkbox("Back", "Triceps").checked);
+  assert.ok(checkbox("Legs", "Biceps").checked);
+  for (const primary of ["Chest", "Back", "Legs"]) assert.ok(checkbox(primary, "Abs").checked);
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.gym_split, {
+    chest: ["shoulders", "abs"], back: ["triceps", "abs"], legs: ["biceps", "abs"],
+  });
+  for (const [primary, old, next] of [["Chest", "Shoulders", "Biceps"], ["Back", "Triceps", "Shoulders"], ["Legs", "Biceps", "Triceps"]]) {
+    await click(checkbox(primary, old));
+    await click(checkbox(primary, "Abs"));
+    await click(checkbox(primary, next));
+  }
+  assert.equal(document.querySelector(".calendar-card--proposal"), null);
+  assert.deepEqual(state.sessions, []);
+  const expected = { chest: ["biceps"], back: ["shoulders"], legs: ["triceps"] };
+  await click(button("Generate suggestions"));
+  assert.deepEqual(state.requests.at(-1).body.gym_split, expected);
+  assert.match(document.querySelector(".calendar-card--proposal").textContent, /Chest, Biceps/);
+  await click(document.querySelector('button[aria-label^="Remove suggestion"]'));
+  await click(button("Recalculate"));
+  assert.deepEqual(state.requests.at(-1).body.gym_split, expected);
+  await click(button("Generate suggestions"));
+  await click(document.querySelector('button[aria-label^="Confirm "]'));
+  assert.deepEqual(state.requests.at(-1).body.gym_split, expected);
+  assert.deepEqual(state.requests.at(-1).body.proposals[0].muscle_groups, ["chest", "biceps"]);
+  assert.deepEqual(state.sessions[0].muscle_groups, ["chest", "biceps"]);
+});
+
+// Per-session accessory lists support multiple muscles, only a primary, and independent Abs.
+test("gym split accessories remain optional and settings lock during editing", async (t) => {
+  const state = await setup(t);
+  const checkbox = (primary, group) => document.querySelector(`[aria-label="${primary} with ${group}"]`);
+  await click(checkbox("Chest", "Shoulders"));
+  await click(checkbox("Chest", "Abs"));
+  await click(checkbox("Back", "Biceps"));
+  await click(checkbox("Back", "Shoulders"));
+  await click(button("Generate suggestions"));
+  const split = state.requests.at(-1).body.gym_split;
+  assert.deepEqual(split.chest, []);
+  assert.deepEqual(new Set(split.back), new Set(["triceps", "abs", "biceps", "shoulders"]));
+  assert.deepEqual(split.legs, ["biceps", "abs"]);
+  await click(button("Edit"));
+  for (const box of document.querySelectorAll(".gym-split-settings input")) {
+    assert.ok(box.matches(":disabled"));
+  }
+});

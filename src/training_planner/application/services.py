@@ -1,5 +1,6 @@
 """Application operations shared by HTTP routes and future interfaces."""
 
+import sqlite3
 from contextlib import closing
 from dataclasses import replace
 from datetime import date, timedelta
@@ -9,6 +10,7 @@ from pathlib import Path
 from training_planner.domain.models import (
     Activity,
     ActivityWeekdays,
+    GymSplit,
     ProposalMove,
     Session,
     Status,
@@ -21,6 +23,7 @@ from training_planner.storage.db import (
     connect,
     delete_session,
     list_sessions,
+    recent_gym_targets_before,
     save_session,
     set_session_status,
 )
@@ -152,6 +155,15 @@ def remove_session(path: Path, session_id: int) -> None:
             raise LookupError(f"Session {session_id} does not exist")
 
 
+def _planning_sessions(
+    conn: sqlite3.Connection, start: date, weeks: int
+) -> list[Session]:
+    """Load neighboring recovery work and older primary targets on one connection."""
+    recovery_start = start - timedelta(days=7)
+    existing = list_sessions(conn, recovery_start, start + timedelta(days=7 * weeks + 6))
+    return recent_gym_targets_before(conn, recovery_start) + existing
+
+
 def _suggest_with_moves(
     week_start: date,
     existing: list[Session],
@@ -163,6 +175,7 @@ def _suggest_with_moves(
     targets: TrainingTargets,
     weekdays: ActivityWeekdays,
     excluded: set[tuple[date, Activity]],
+    gym_split: GymSplit,
 ) -> list[Session]:
     """Reserve explicit draft positions and plan around them without saving them.
 
@@ -202,6 +215,7 @@ def _suggest_with_moves(
         targets=targets,
         weekdays=weekdays,
         excluded=origins | excluded,
+        gym_split=gym_split,
     )
     return sorted(
         pinned + generated, key=lambda session: (session.day, session.activity.value)
@@ -218,6 +232,7 @@ def generate_proposals(
     targets: TrainingTargets = TrainingTargets(),
     weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
+    gym_split: GymSplit = GymSplit(),
 ) -> list[Session]:
     """Generate a preview without saving any proposed workouts.
 
@@ -244,6 +259,8 @@ def generate_proposals(
         Recurring allowed weekdays used for generation and draft moves.
     excluded : set[tuple[date, Activity]] | None
         Individual workout exclusions, preserving other same-day activities.
+    gym_split : GymSplit
+        Accessory targets paired with each primary group in the gym rotation.
 
     Returns
     -------
@@ -261,9 +278,8 @@ def generate_proposals(
     """
     if weeks != 4:
         raise ValueError("weeks must be 4 (28 days)")
-    existing = get_sessions(
-        path, week_start - timedelta(days=7), week_start + timedelta(days=7 * weeks + 6)
-    )
+    with closing(connect(path)) as conn:
+        existing = _planning_sessions(conn, week_start, weeks)
     return _suggest_with_moves(
         week_start,
         existing,
@@ -275,6 +291,7 @@ def generate_proposals(
         targets,
         weekdays,
         excluded or set(),
+        gym_split,
     )
 
 
@@ -290,6 +307,7 @@ def accept_proposals(
     targets: TrainingTargets = TrainingTargets(),
     weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
+    gym_split: GymSplit = GymSplit(),
 ) -> list[Session]:
     """Revalidate selected suggestions and commit the entire selection atomically.
 
@@ -319,6 +337,8 @@ def accept_proposals(
         Recurring allowed weekdays used for generation and draft moves.
     excluded : set[tuple[date, Activity]] | None
         Same per-workout exclusions used for the preview.
+    gym_split : GymSplit
+        Same accessory targets used to generate the gym rotation in the preview.
 
     Returns
     -------
@@ -342,11 +362,7 @@ def accept_proposals(
         # Reserve the write transaction before reading so competing requests
         # cannot book a proposed date between validation and insertion.
         conn.execute("BEGIN IMMEDIATE")
-        existing = list_sessions(
-            conn,
-            week_start - timedelta(days=7),
-            week_start + timedelta(days=7 * weeks + 6),
-        )
+        existing = _planning_sessions(conn, week_start, weeks)
         not_before = _planning_date()
         if any(session.day < not_before for session in proposals):
             raise ProposalConflict(
@@ -363,6 +379,7 @@ def accept_proposals(
             targets,
             weekdays,
             excluded or set(),
+            gym_split,
         )
         if len({(s.day, s.activity) for s in proposals}) != len(proposals):
             raise ProposalConflict(
@@ -385,6 +402,7 @@ def accept_proposals(
                     targets,
                     weekdays,
                     excluded or set(),
+                    gym_split,
                 )
                 if not_before > week_start
                 else []

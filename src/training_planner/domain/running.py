@@ -1,6 +1,6 @@
 """Heart-rate targets and conservative calendar heuristics, not fitness estimates."""
 
-from training_planner.domain.models import Activity, Session, Status
+from training_planner.domain.models import Activity, MuscleGroup, Session, Status
 
 HARD_RUNS = {
     Activity.INTERVAL_RUN,
@@ -45,6 +45,30 @@ def is_demanding(session: Session) -> bool:
             and (workload_duration(session) or 0) >= 90
         )
     )
+
+
+def leg_endurance_conflict(first: Session, second: Session) -> bool:
+    """Leave a full calendar day between legs and hikes, cycling or demanding runs.
+
+    This is a scheduling precaution based on selected muscles, not an estimate
+    of gym intensity. It is symmetric and independent of existing endurance
+    buffers, including the short Monday easy-run exception.
+    """
+    if first.status == Status.SKIPPED or second.status == Status.SKIPPED:
+        return False
+    if abs((first.day - second.day).days) >= 2:
+        return False
+    for gym, endurance in ((first, second), (second, first)):
+        if gym.activity != Activity.GYM or MuscleGroup.LEGS not in gym.muscle_groups:
+            continue
+        running = endurance.activity in HARD_RUNS or endurance.activity.value.endswith(
+            "_run"
+        )
+        if endurance.activity in {Activity.HIKE, Activity.CYCLE} or (
+            running and is_demanding(endurance)
+        ):
+            return True
+    return False
 
 
 def recovery_days(session: Session) -> int:

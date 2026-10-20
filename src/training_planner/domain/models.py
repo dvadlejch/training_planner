@@ -43,6 +43,38 @@ def validate_muscle_groups(activity: Activity, groups: list[MuscleGroup]) -> Non
         raise ValueError("Muscle groups must be unique")
 
 
+GYM_PRIMARY_GROUPS = (MuscleGroup.CHEST, MuscleGroup.BACK, MuscleGroup.LEGS)
+
+
+@dataclass(frozen=True)
+class GymSplit:
+    """Accessory targets paired with each primary group in the rotating gym split."""
+
+    chest: tuple[MuscleGroup, ...] = (MuscleGroup.SHOULDERS, MuscleGroup.ABS)
+    back: tuple[MuscleGroup, ...] = (MuscleGroup.TRICEPS, MuscleGroup.ABS)
+    legs: tuple[MuscleGroup, ...] = (MuscleGroup.BICEPS, MuscleGroup.ABS)
+
+    def __post_init__(self) -> None:
+        """Allow unique smaller muscles and abs, including an empty accessory list."""
+        for groups in (self.chest, self.back, self.legs):
+            if not isinstance(groups, tuple):
+                raise ValueError("Gym split accessories must be tuples")
+            validate_muscle_groups(Activity.GYM, list(groups))
+            if any(group in GYM_PRIMARY_GROUPS for group in groups):
+                raise ValueError(
+                    "Gym split accessories must be biceps, triceps, shoulders or abs"
+                )
+
+    def groups_for(self, primary: MuscleGroup) -> list[MuscleGroup]:
+        """Build the session targets without exposing mutable shared defaults."""
+        accessories = {
+            MuscleGroup.CHEST: self.chest,
+            MuscleGroup.BACK: self.back,
+            MuscleGroup.LEGS: self.legs,
+        }
+        return [primary, *accessories[primary]]
+
+
 class Status(str, Enum):
     """Represent a saved workout's planning or completion status."""
 

@@ -57,12 +57,18 @@ export interface ActivityWeekdays {
   running: number[];
 }
 
+export const gymPrimaryGroups = ["chest", "back", "legs"] as const;
+export const gymAccessoryGroups = ["biceps", "triceps", "shoulders", "abs"] as const;
+export type GymAccessory = typeof gymAccessoryGroups[number];
+export type GymSplit = Record<typeof gymPrimaryGroups[number], GymAccessory[]>;
+
 export interface PlanningRequest {
   /** Inclusive start of the rolling horizon; new plans use today's local date. */
   week_start: string;
   weeks: 4;
   targets: TrainingTargets;
   weekdays: ActivityWeekdays;
+  gym_split?: GymSplit;
   excluded?: ProposalKey[];
   blocked: string[];
   moves?: ProposalMove[];

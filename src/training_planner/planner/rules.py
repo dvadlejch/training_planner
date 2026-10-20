@@ -5,11 +5,17 @@ from datetime import date, timedelta
 from training_planner.domain.models import (
     Activity,
     ActivityWeekdays,
+    GymSplit,
     Session,
     Status,
     TrainingTargets,
 )
-from training_planner.domain.running import recovery_days, workload_duration
+from training_planner.domain.running import (
+    leg_endurance_conflict,
+    recovery_days,
+    workload_duration,
+)
+from training_planner.planner.gym import assign_gym_targets
 
 
 def _is_short_monday_easy_run(session: Session) -> bool:
@@ -25,8 +31,12 @@ def _is_short_monday_easy_run(session: Session) -> bool:
 
 
 def recovery_conflict(candidate: Session, other: Session) -> bool:
-    """Protect endurance in either insertion order; ordinary gym load is unknown."""
-    if other.status == Status.SKIPPED or other.activity == Activity.REST:
+    """Protect endurance and identified leg sessions in either insertion order."""
+    if candidate.status == Status.SKIPPED or other.status == Status.SKIPPED:
+        return False
+    if leg_endurance_conflict(candidate, other):
+        return True
+    if other.activity == Activity.REST:
         return False
     if other.activity == Activity.GYM and recovery_days(other) == 0:
         return False
@@ -53,6 +63,7 @@ def suggest_week(
     targets: TrainingTargets = TrainingTargets(),
     weekdays: ActivityWeekdays = ActivityWeekdays(),
     excluded: set[tuple[date, Activity]] | None = None,
+    gym_split: GymSplit = GymSplit(),
 ) -> list[Session]:
     """Fill soft targets over four seven-day periods without changing saved work.
 
@@ -63,6 +74,8 @@ def suggest_week(
     ordinary gym session and an easy/recovery run, with at most two items a day.
     Recurring allowed weekdays restrict new gym/running suggestions; saved work
     outside those days is preserved and still counts toward the targets.
+    Gym muscle targets rotate chronologically using the selected accessory split
+    and any known primary targets on saved workouts.
     """
     end = week_start + timedelta(days=PLANNING_DAYS - 1)
     blocked = blocked or set()
@@ -212,4 +225,6 @@ def suggest_week(
                     "review before confirming.",
                 )
             )
-    return sorted(proposals, key=lambda s: (s.day, s.activity.value))
+    return assign_gym_targets(
+        proposals, active, gym_split, start=max(week_start, not_before)
+    )

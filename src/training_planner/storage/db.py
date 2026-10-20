@@ -6,7 +6,13 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
-from training_planner.domain.models import Activity, MuscleGroup, Session, Status
+from training_planner.domain.models import (
+    GYM_PRIMARY_GROUPS,
+    Activity,
+    MuscleGroup,
+    Session,
+    Status,
+)
 
 DEFAULT_DB = Path("data/training.db")
 
@@ -164,6 +170,21 @@ def list_sessions(conn: sqlite3.Connection, start: date, end: date) -> list[Sess
         (start.isoformat(), end.isoformat()),
     ).fetchall()
     return [_session_from_row(row) for row in rows]
+
+
+def recent_gym_targets_before(conn: sqlite3.Connection, before: date) -> list[Session]:
+    """Read the last workout for each primary group to retain deferred leg priority."""
+    sessions: dict[int, Session] = {}
+    for group in GYM_PRIMARY_GROUPS:
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE day < ? AND activity = ? AND status != ? "
+            "AND EXISTS (SELECT 1 FROM json_each(sessions.muscle_groups) "
+            "WHERE value = ?) ORDER BY day DESC, id DESC LIMIT 1",
+            (before.isoformat(), Activity.GYM.value, Status.SKIPPED.value, group.value),
+        ).fetchone()
+        if row is not None:
+            sessions[row["id"]] = _session_from_row(row)
+    return sorted(sessions.values(), key=lambda s: (s.day, s.id or 0))
 
 
 def _session_from_row(row: sqlite3.Row) -> Session:

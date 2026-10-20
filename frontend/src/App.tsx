@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession, updateSession, updateSessionStatus } from "./api/client";
-import { type PlanningRequest, type Session, type SessionInput, type TrainingTargets, type ActivityWeekdays } from "./api/types";
+import { type GymSplit, type PlanningRequest, type Session, type SessionInput, type TrainingTargets, type ActivityWeekdays } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
 import HeartRateCalculator from "./components/HeartRateCalculator";
 import RescheduleDialog from "./components/RescheduleDialog";
 import SessionForm from "./components/SessionForm";
+import GymSplitSettings from "./components/GymSplitSettings";
 import { addDays, localDate, monthRange, shiftMonth } from "./calendar";
 
 function sameWorkout(a: Pick<SessionInput, "day" | "activity">, b: Pick<SessionInput, "day" | "activity">): boolean {
@@ -43,6 +44,9 @@ export default function App(): ReactElement {
   const [targets, setTargets] = useState<TrainingTargets>({ gym: 3, runs: 2, intervals: 0 });
   const [weekdays, setWeekdays] = useState<ActivityWeekdays>(() => ({
     gym: [0, 1, 2, 3, 4, 5, 6], running: [0, 1, 2, 3, 4, 5, 6],
+  }));
+  const [gymSplit, setGymSplit] = useState<GymSplit>(() => ({
+    chest: ["shoulders", "abs"], back: ["triceps", "abs"], legs: ["biceps", "abs"],
   }));
   const [blocked, setBlocked] = useState<string[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -123,7 +127,7 @@ export default function App(): ReactElement {
   }
 
   function askToReschedule(input = preview?.input ?? {
-    week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked],
+    week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, gym_split: gymSplit, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked],
   }): void {
     setReschedule(input);
   }
@@ -202,7 +206,7 @@ export default function App(): ReactElement {
 
   async function generate(): Promise<void> {
     if (interactionBlocked || editing || loading) return;
-    const input = { week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked] };
+    const input = { week_start: localDate(new Date()), weeks: 4 as const, targets: { ...targets }, gym_split: gymSplit, weekdays: { gym: [...weekdays.gym], running: [...weekdays.running] }, blocked: [...blocked] };
     await run(async () => {
       setPreview(null);
       const proposed = await generateProposals(input);
@@ -396,6 +400,13 @@ export default function App(): ReactElement {
               </fieldset>
             ))}
           </div>
+          <GymSplitSettings value={gymSplit} disabled={interactionBlocked || editing}
+            onChange={(value) => {
+              setGymSplit(value);
+              setPreview(null); setError(""); setNotice("");
+            }} />
+          <p className="muted">Saved muscle targets continue the rotation. Skipped sessions do not count; workouts without a primary muscle target leave the rotation unchanged.</p>
+          <p className="muted">Leg gym sessions keep at least one full calendar day clear of hikes, cycling and intensive runs. Legs may move earlier in the split or wait for a safe gym date. Easy runs can still pair with gym. Saved workouts and manually moved suggestions stay as entered.</p>
           <p className="muted">Suggestions start today and cover the next 28 days, including today.</p>
           <p className="muted">Only selected weekdays are used for new gym and running suggestions. Targets apply to each seven-day period starting today. Saved workouts count toward them. Availability and recovery may leave targets unmet. Other runs are easy or long easy runs. An easy run and gym session can share a day.</p>
           <p className="muted">Mark unavailable days directly in the calendar to exclude them from suggestions. Saved workouts still count toward recovery. Training settings and unavailable days last until you reload the page.</p>
@@ -412,8 +423,9 @@ export default function App(): ReactElement {
             zones and conversational effort for easy runs. The calculator is optional.</p>
           <p>Durations are editable examples. Interval targets apply to hard repetitions,
             with easy warm-up, recoveries and cool-down included in the total time.</p>
-          <p>Scheduling keeps long endurance away from known demanding days. Generic gym
-            entries do not yet identify heavy leg sessions; review those conflicts yourself.</p>
+          <p>Scheduling keeps long endurance away from known demanding days. Selecting Legs
+            on a gym workout also keeps new hikes, cycling and intensive runs at least
+            one full calendar day away. Gym entries without selected muscles have unknown leg load.</p>
           <p><a href="https://www.polar.com/us-en/guide/endurance-training">Polar: endurance zones</a>
             {" | "}<a href="https://www.polar.com/us-en/guide/anaerobic-training">Polar: higher zones</a>
             {" | "}<a href="https://www.ntnu.edu/cerg/advice">NTNU: interval guidance</a>
