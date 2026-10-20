@@ -85,7 +85,11 @@ The UI should avoid requiring detailed metrics just to record that an activity h
 
 Gym logging currently supports duration, effort, status, optional active calories,
 and multiline workout notes for exercises, weights and repetitions. Structured
-exercise/set records, gym session subtypes and performance trends remain planned.
+exercise/set records and performance trends remain planned. Gym sessions support optional
+muscle-group selection: Chest, Legs and Back (large groups), Biceps, Triceps and
+Shoulders (small groups), plus Abs. Select any combination when adding or editing
+a gym workout; selections are saved and shown in its details. Automatic gym
+rotation and muscle-specific recovery rules remain planned.
 
 ## 6. Optional fitness and recovery information
 
@@ -333,7 +337,9 @@ README.md                 # Product specification and setup
 
 The interface calls application services through the API. Services coordinate the domain, planner and repository; the domain and planner do not import FastAPI, React or SQLite. HTTP validation lives at the API boundary. Database connections are short-lived, and services own write transactions.
 
-The prototype creates the current schema at `data/training.db`. Older database schemas and retired activity categories are not supported; discard development data when changing the schema. `TRAINING_PLANNER_DB` can override the location; use an absolute path when launching outside the project root.
+The prototype creates the current schema at `data/training.db`. The muscle-group
+update adds its optional field to the preceding schema automatically, preserving
+existing sessions with an empty selection. Older database schemas and retired activity categories are not supported; discard development data when changing the schema. `TRAINING_PLANNER_DB` can override the location; use an absolute path when launching outside the project root.
 
 Likely future domain concepts include `CalendarItem`, `TimeBlock`, `Availability`, `GoalPriority`, `TrainingPreference`, `WorkoutMetrics`, `ReadinessEntry`, and `PlanningProposal`, with stable identifiers, optional metrics and explicit ownership/status distinctions. Those types are **proposals**, not current modules or database tables.
 
@@ -412,7 +418,7 @@ npm run preview
 
 The preview runs on port 4173 and also requires the backend on port 8000. It is a local build preview, not a production deployment configuration. After updating frontend dependencies with `npm install`, commit the updated `package-lock.json`.
 
-The SQLite database is created locally at `data/training.db` on the first session/planning operation. Importing the API or checking `/api/health` does not create a database. The application is currently a single-user local prototype. Backup/sync, migrations, data import and multi-user support are not yet provided.
+The SQLite database is created locally at `data/training.db` on the first session/planning operation. Importing the API or checking `/api/health` does not create a database. The application is currently a single-user local prototype. Backup/sync, general migrations, data import and multi-user support are not yet provided.
 
 ## Windows application and installer builds
 
@@ -489,13 +495,15 @@ Setup invokes `TrainingPlanner.exe --init-db` and reports initialization failure
 The app also initializes missing tables on launch. Its database always lives at
 `data/training.db` relative to the executable, independent of shortcuts, working
 directory, or a development `TRAINING_PLANNER_DB` override. No existing checkout
-database is copied, migrated or backed up. Reinstalling preserves existing records;
+database is copied or backed up. Installed databases receive the optional
+muscle-group column when missing. Reinstalling preserves existing records;
 uninstalling removes installed application files while leaving application-created
 data in place. Close the app before installing an update. A portable packaged folder
 can be moved while the app is closed. Keep installed copies at their selected location
 so Windows' registered uninstaller and any chosen shortcuts continue to work.
 
-Database migrations, automatic backups and automatic updates remain unimplemented.
+General database migrations, automatic backups and automatic updates remain unimplemented;
+the additive muscle-group column update is the only supported schema upgrade.
 Older incompatible prototype schemas are still unsupported; use a fresh database
 for this test-data stage. Before retaining real history across schema changes,
 implement migrations and a backup policy. Release builds run automated source checks;

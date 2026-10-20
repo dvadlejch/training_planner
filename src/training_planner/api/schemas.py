@@ -5,7 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from training_planner.domain.models import Activity, Status
+from training_planner.domain.models import (
+    Activity,
+    MuscleGroup,
+    Status,
+    validate_muscle_groups,
+)
 from training_planner.domain.running import validate_zone_target
 
 
@@ -24,12 +29,15 @@ class SessionInput(BaseModel):
     active_calories_kcal: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     effort: int | None = Field(default=None, ge=1, le=10)
     notes: str = ""
+    muscle_groups: list[MuscleGroup] = Field(default_factory=list)
     hr_zone_min: int | None = Field(default=None, ge=1, le=5)
     hr_zone_max: int | None = Field(default=None, ge=1, le=5)
 
     @model_validator(mode="after")
-    def validate_zones(self):
+    def validate_targets(self) -> "SessionInput":
+        """Check related zone bounds and gym-only muscle selections."""
         validate_zone_target(self.hr_zone_min, self.hr_zone_max)
+        validate_muscle_groups(self.activity, self.muscle_groups)
         return self
 
 

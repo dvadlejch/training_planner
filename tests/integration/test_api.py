@@ -713,7 +713,7 @@ def test_update_session_preserves_identity_and_other_entries(client, status):
     }
     response = client.put(f"/api/sessions/{original['id']}", json=replacement)
     assert response.status_code == 200
-    updated = {**replacement, "id": original["id"]}
+    updated = {**replacement, "id": original["id"], "muscle_groups": []}
     assert response.json() == updated
     assert client.get(
         "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}

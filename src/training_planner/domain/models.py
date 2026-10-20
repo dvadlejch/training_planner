@@ -1,6 +1,6 @@
 """Core domain types shared by the application, planner, and storage layer."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
 
@@ -19,6 +19,28 @@ class Activity(str, Enum):
     HIKE = "hike"
     CYCLE = "cycle"
     REST = "rest"
+
+
+class MuscleGroup(str, Enum):
+    """Optional muscle targets for a gym workout."""
+
+    CHEST = "chest"
+    LEGS = "legs"
+    BACK = "back"
+    BICEPS = "biceps"
+    TRICEPS = "triceps"
+    SHOULDERS = "shoulders"
+    ABS = "abs"
+
+
+def validate_muscle_groups(activity: Activity, groups: list[MuscleGroup]) -> None:
+    """Keep gym targets unique and prevent targets on other activity types."""
+    if groups and activity != Activity.GYM:
+        raise ValueError("Muscle groups can only be selected for gym sessions")
+    if any(not isinstance(group, MuscleGroup) for group in groups):
+        raise ValueError("Unknown muscle group")
+    if len(groups) != len(set(groups)):
+        raise ValueError("Muscle groups must be unique")
 
 
 class Status(str, Enum):
@@ -46,6 +68,8 @@ class Session:
         Optional RPE from 1 to 10; None means unknown.
     notes
         User notes or the starter suggestion explanation.
+    muscle_groups
+        Optional gym muscle targets; empty means unspecified.
     id
         Database identifier; None indicates an unsaved session.
     """
@@ -57,6 +81,7 @@ class Session:
     effort: int | None = None
     notes: str = ""
     id: int | None = None
+    muscle_groups: list[MuscleGroup] = field(default_factory=list)
     # Planned main-set targets in the five-zone model, not measured average HR.
     hr_zone_min: int | None = None
     hr_zone_max: int | None = None

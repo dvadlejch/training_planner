@@ -1,4 +1,4 @@
-import type { SessionInput } from "./api/types";
+import { muscleGroupLabel, type SessionInput } from "./api/types";
 
 /** Activity-specific results shared by the editor and event details. */
 export function activityStats(activity: SessionInput["activity"]) {
@@ -42,8 +42,11 @@ export function averagePace(distance: number | null, minutes: number | null): st
 
 /** Keep completed results separate from upcoming targets in compact cards. */
 export function sessionOverview(session: SessionInput): string {
+  const muscles = session.activity === "gym" && session.muscle_groups?.length
+    ? session.muscle_groups.map(muscleGroupLabel).join(", ") : null;
   if (session.status !== "completed") {
     return [
+      muscles,
       session.duration_min != null ? `${session.duration_min} min planned` : null,
       session.hr_zone_min != null ? (session.hr_zone_min === session.hr_zone_max
         ? `Target Z${session.hr_zone_min}` : `Target Z${session.hr_zone_min}-${session.hr_zone_max}`) : null,
@@ -51,6 +54,7 @@ export function sessionOverview(session: SessionInput): string {
   }
   const stats = activityStats(session.activity);
   return [
+    muscles,
     stats.distance && session.distance_km != null ? `${session.distance_km} km` : null,
     stats.duration && session.actual_duration_min != null ? `${session.actual_duration_min} min` : null,
     stats.pace ? averagePace(session.distance_km, session.actual_duration_min) : null,

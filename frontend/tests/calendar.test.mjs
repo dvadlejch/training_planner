@@ -111,7 +111,7 @@ async function submit() {
   await act(async () => form().dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
 }
 
-// Add on a later calendar week and discard the preview only after persistence.
+// Save gym muscle targets on a later calendar week and show them on the saved card.
 test("add training inline on the selected day across a multiweek horizon", async (t) => {
   const state = await setup(t, []);
   const horizon = document.querySelector(".planning-controls select");
@@ -126,17 +126,20 @@ test("add training inline on the selected day across a multiweek horizon", async
   await change(form().elements.activity, "gym");
   await change(form().elements.duration, "45");
   await change(form().elements.notes, "Added inline");
+  await click(form().querySelector('[name="muscle_groups"][value="chest"]'));
+  await click(form().querySelector('[name="muscle_groups"][value="abs"]'));
   await submit();
   const request = state.requests.at(-1);
   assert.equal(request.method, "POST");
   assert.deepEqual(request.body, {
     day, activity: "gym", status: "planned", duration_min: 45, effort: null,
-    hr_zone_min: null, hr_zone_max: null, notes: "Added inline",
+    hr_zone_min: null, hr_zone_max: null, notes: "Added inline", muscle_groups: ["chest", "abs"],
     actual_duration_min: null, distance_km: null, average_hr_bpm: null,
     elevation_gain_m: null, active_calories_kcal: null,
   });
   assert.equal(form(), null);
   assert.match(document.body.textContent, /Added inline/);
+  assert.match(document.querySelector(".monthly-calendar").textContent, /Chest, Abs/);
   assert.doesNotMatch(document.body.textContent, /Suggested workout/);
   assert.equal(document.querySelector('[aria-labelledby="log-heading"]'), null);
 });

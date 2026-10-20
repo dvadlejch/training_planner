@@ -5,6 +5,14 @@ export const activities = [
 ] as const;
 export const statuses = ["planned", "confirmed", "completed", "skipped"] as const;
 
+export const muscleGroupCategories = [
+  { label: "Large muscle groups", groups: ["chest", "legs", "back"] },
+  { label: "Small muscle groups", groups: ["biceps", "triceps", "shoulders"] },
+  { label: "Core", groups: ["abs"] },
+] as const;
+export type MuscleGroup = typeof muscleGroupCategories[number]["groups"][number];
+export const muscleGroupLabel = (group: MuscleGroup): string => group[0].toUpperCase() + group.slice(1);
+
 export interface SessionInput {
   day: string;
   activity: typeof activities[number];
@@ -17,6 +25,7 @@ export interface SessionInput {
   active_calories_kcal: number | null;
   effort: number | null;
   notes: string;
+  muscle_groups: MuscleGroup[];
   hr_zone_min: number | null;
   hr_zone_max: number | null;
 }

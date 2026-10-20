@@ -13,6 +13,7 @@ from training_planner.domain.models import (
     Session,
     Status,
     TrainingTargets,
+    validate_muscle_groups,
 )
 from training_planner.domain.running import validate_zone_target
 from training_planner.planner.rules import suggest_week
@@ -106,6 +107,7 @@ def create_session(path: Path, session: Session) -> Session:
 def _validate_session(session: Session) -> None:
     """Validate optional workout metrics for both creation and editing."""
     validate_zone_target(session.hr_zone_min, session.hr_zone_max)
+    validate_muscle_groups(session.activity, session.muscle_groups)
     for name, value in (
         ("actual_duration_min", session.actual_duration_min),
         ("distance_km", session.distance_km),
