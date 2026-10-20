@@ -3,6 +3,7 @@
 import asyncio
 import socket
 import sys
+from datetime import date
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -79,7 +80,8 @@ def test_frontend_and_api_share_one_server(tmp_path):
         assert client.get("/api/health").json() == {"status": "ok"}
         assert (
             client.post(
-                "/api/sessions", json={"day": "2026-10-18", "activity": "gym"}
+                "/api/sessions",
+                json={"day": date.today().isoformat(), "activity": "gym"},
             ).status_code
             == 201
         )

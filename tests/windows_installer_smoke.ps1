@@ -61,7 +61,7 @@ try {
             Start-Sleep -Milliseconds 100
         } while ((Get-Date) -lt $deadline)
         if (-not $url) { throw 'Timed out waiting for the installed server.' }
-        Invoke-RestMethod -Uri "$url/api/sessions" -Method Post -ContentType 'application/json' -Body '{"day":"2026-10-18","activity":"gym"}' -TimeoutSec 5 | Out-Null
+        Invoke-RestMethod -Uri "$url/api/sessions" -Method Post -ContentType 'application/json' -Body (@{ day = (Get-Date -Format 'yyyy-MM-dd'); activity = 'gym' } | ConvertTo-Json) -TimeoutSec 5 | Out-Null
     } finally {
         if (-not $server.HasExited) { Stop-Process -Id $server.Id }
         $server.WaitForExit()

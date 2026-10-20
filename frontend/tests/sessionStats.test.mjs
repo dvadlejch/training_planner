@@ -15,7 +15,7 @@ const { averagePace, sessionOverview, parseDuration } = await import(sourceUrl("
 const { default: SessionForm } = await import(sourceUrl("../src/components/SessionForm.tsx"));
 const { default: SessionDetails } = await import(sourceUrl("../src/components/SessionDetails.tsx"));
 const session = {
-  id: 1, day: "2026-10-06", activity: "easy_run", status: "completed",
+  id: 1, day: new Date().toLocaleDateString("sv-SE"), activity: "easy_run", status: "completed",
   duration_min: 45, actual_duration_min: 32, distance_km: 5.2,
   average_hr_bpm: 142, elevation_gain_m: 120, active_calories_kcal: 340,
   hr_zone_min: 2, hr_zone_max: 2, effort: 5, notes: "First line\nSecond line",
@@ -270,4 +270,57 @@ test("invalid completed duration blocks saving and recovers after correction", a
   assert.equal(host.querySelector('[role="alert"]'), null);
   await act(async () => host.querySelector("form").requestSubmit());
   assert.equal(saves, 1);
+});
+
+
+// Historical additions offer only completed/skipped and save results without default targets.
+test("adding past training defaults to completed and hides upcoming statuses", async (t) => {
+  let submitted;
+  const host = await render(t, SessionForm, {
+    day: "2000-01-01", session: null, disabled: false, error: "",
+    onSave: async (input) => { submitted = input; }, onCancel: () => {},
+  });
+  const status = host.querySelector('[name="status"]');
+  assert.deepEqual([...status.options].map((option) => option.value), ["completed", "skipped"]);
+  assert.equal(status.value, "completed");
+  assert.equal(host.querySelector('[name="duration"]'), null);
+  await act(async () => host.querySelector("form").requestSubmit());
+  assert.equal(submitted.day, "2000-01-01");
+  assert.equal(submitted.status, "completed");
+  assert.equal(submitted.duration_min, null);
+  assert.equal(submitted.hr_zone_min, null);
+  await change(status, "skipped");
+  await act(async () => host.querySelector("form").requestSubmit());
+  assert.equal(submitted.status, "skipped");
+});
+
+// Changing dates updates valid options while preserving plan and result drafts.
+test("new training status options follow the selected date", async (t) => {
+  const today = new Date().toLocaleDateString("sv-SE");
+  const host = await render(t, SessionForm, {
+    day: today, session: null, disabled: false, error: "",
+    onSave: async () => {}, onCancel: () => {},
+  });
+  const date = host.querySelector('[name="day"]');
+  const status = host.querySelector('[name="status"]');
+  const options = () => [...status.options].map((option) => option.value);
+  assert.deepEqual(options(), ["planned", "confirmed", "completed", "skipped"]);
+  assert.equal(status.value, "planned");
+  assert.equal(date.hasAttribute("min"), false);
+  await change(status, "confirmed");
+  await change(host.querySelector('[name="duration"]'), "50");
+  await change(date, "2000-01-01");
+  assert.deepEqual(options(), ["completed", "skipped"]);
+  assert.equal(status.value, "completed");
+  await change(host.querySelector('[name="actual_duration_min"]'), "42");
+  await change(date, today);
+  assert.deepEqual(options(), ["planned", "confirmed", "completed", "skipped"]);
+  assert.equal(status.value, "confirmed");
+  assert.equal(host.querySelector('[name="duration"]').value, "50");
+  await change(date, "2000-01-01");
+  assert.equal(host.querySelector('[name="actual_duration_min"]').value, "42");
+  await change(status, "skipped");
+  await change(date, "2099-01-01");
+  assert.equal(status.value, "skipped");
+  assert.deepEqual(options(), ["planned", "confirmed", "completed", "skipped"]);
 });

@@ -423,6 +423,7 @@ def test_planning_loads_previous_week_recovery(client):
         json={
             "day": "2026-10-04",
             "activity": "race",
+            "status": "completed",
             "duration_min": 60,
         },
     )
@@ -1385,3 +1386,57 @@ def test_changed_weekdays_reject_an_ineligible_preview(client):
         },
     )
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
+@pytest.mark.parametrize("day", ["2026-10-04", "2026-10-05", "2026-10-06"])
+def test_manual_session_date_cutoff(client, status: str, day: str) -> None:
+    """Reject past upcoming entries while allowing today, future and recorded history."""
+    payload = {"day": day, "activity": "gym", "status": status}
+    response = client.post("/api/sessions", json=payload)
+    rejected = day < "2026-10-05" and status in ("planned", "confirmed")
+    assert response.status_code == (422 if rejected else 201)
+    sessions = client.get(
+        "/api/sessions", params={"start": "2026-10-04", "end": "2026-10-06"}
+    ).json()
+    assert sessions == ([] if rejected else [response.json()])
+    if rejected:
+        assert "today or later" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
+@pytest.mark.parametrize("day", ["2026-10-04", "2026-10-05", "2026-10-06"])
+def test_edit_session_date_cutoff(client, status: str, day: str) -> None:
+    """Validate date and status together on edits and preserve rejected records."""
+    payload = {"day": "2026-10-06", "activity": "gym", "notes": "Original"}
+    saved = client.post("/api/sessions", json=payload).json()
+    edited = {**payload, "day": day, "status": status, "notes": "Edited"}
+    response = client.put(f"/api/sessions/{saved['id']}", json=edited)
+    rejected = day < "2026-10-05" and status in ("planned", "confirmed")
+    assert response.status_code == (422 if rejected else 200)
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-04", "end": "2026-10-06"}
+    ).json() == [saved if rejected else response.json()]
+
+
+@pytest.mark.parametrize("status", ["planned", "confirmed", "completed", "skipped"])
+@pytest.mark.parametrize("elapsed", [False, True])
+def test_status_change_rechecks_current_date(client, planning_clock, status, elapsed):
+    """Recheck the clock on quick status changes and roll back invalid changes.
+
+    Save a workout today, then optionally advance past midnight. Past entries can
+    be completed or skipped, but cannot become planned or confirmed again.
+    """
+    saved = client.post(
+        "/api/sessions", json={"day": "2026-10-05", "activity": "gym"}
+    ).json()
+    if elapsed:
+        planning_clock["today"] = date(2026, 10, 6)
+    response = client.patch(
+        f"/api/sessions/{saved['id']}/status", json={"status": status}
+    )
+    rejected = elapsed and status in ("planned", "confirmed")
+    assert response.status_code == (422 if rejected else 200)
+    assert client.get(
+        "/api/sessions", params={"start": "2026-10-05", "end": "2026-10-05"}
+    ).json() == [saved if rejected else {**saved, "status": status}]

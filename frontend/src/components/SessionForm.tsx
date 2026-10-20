@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactElement } from "react";
 import { activities, statuses, type Session, type SessionInput } from "../api/types";
+import { localDate } from "../calendar";
 import { activityLabel, runPresets, zoneLabel } from "../running";
 import { activityStats, averagePace, parseDuration } from "../sessionStats";
 
@@ -17,7 +18,14 @@ export default function SessionForm({
   day, session, disabled, error, onSave, onCancel,
 }: SessionFormProps): ReactElement {
   const [activity, setActivity] = useState<SessionInput["activity"]>(session?.activity ?? "easy_run");
-  const [status, setStatus] = useState<SessionInput["status"]>(session?.status ?? "planned");
+  const [selectedDay, setSelectedDay] = useState(session?.day ?? day);
+  const [selectedStatus, setStatus] = useState<SessionInput["status"]>(session?.status ?? "planned");
+  const pastEntry = session === null && selectedDay !== "" && selectedDay < localDate(new Date());
+  // Default historical additions to results without losing the upcoming status draft.
+  const status = pastEntry && (selectedStatus === "planned" || selectedStatus === "confirmed")
+    ? "completed" : selectedStatus;
+  const availableStatuses = pastEntry
+    ? statuses.filter((value) => value === "completed" || value === "skipped") : statuses;
   const [duration, setDuration] = useState(session ? String(session.duration_min ?? "") : "30");
   const [zone, setZone] = useState(session
     ? (session.hr_zone_min === null ? "" : `${session.hr_zone_min}-${session.hr_zone_max}`)
@@ -81,7 +89,8 @@ export default function SessionForm({
       {durationError && <p className="message error" role="alert">{durationError}</p>}
       {error && <p className="message error" role="alert">{error}</p>}
       <fieldset disabled={disabled} className="calendar-editor-fields">
-        <label>Date<input name="day" type="date" defaultValue={session?.day ?? day} required autoFocus /></label>
+        <label>Date<input name="day" type="date" min={session && planning ? localDate(new Date()) : undefined} value={selectedDay}
+          onChange={(event) => setSelectedDay(event.target.value)} required autoFocus /></label>
         <label>Activity<select name="activity" value={activity} onChange={(event) => {
           const next = event.target.value as SessionInput["activity"];
           setActivity(next);
@@ -93,7 +102,7 @@ export default function SessionForm({
         }}>{activities.map((value) => <option key={value} value={value}>{activityLabel(value)}</option>)}</select></label>
         <label>Status<select name="status" value={status}
           onChange={(event) => setStatus(event.target.value as SessionInput["status"])}>
-          {statuses.map((value) => <option key={value} value={value}>{value}</option>)}
+          {availableStatuses.map((value) => <option key={value} value={value}>{value}</option>)}
         </select></label>
         {planning && <>
           <h5 className="session-section-heading">Training targets</h5>

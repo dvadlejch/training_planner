@@ -118,7 +118,7 @@ test("add training inline on the selected day across a multiweek horizon", async
   await change(horizon, "2");
   await click(button("Generate suggestions"));
   assert.match(document.body.textContent, /Suggested workout/);
-  const add = document.querySelectorAll('button[aria-label^="Add training on"]')[10];
+  const add = [...document.querySelectorAll('button[aria-label^="Add training on"]')].at(-1);
   const day = add.getAttribute("aria-label").slice("Add training on ".length);
   await click(add);
   assert.equal(document.querySelectorAll(".monthly-calendar .calendar-day").length % 7, 0);

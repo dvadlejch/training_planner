@@ -1,5 +1,6 @@
 """Verify recorded workout results across API, storage and quick status changes."""
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from training_planner.api.app import create_app
 def test_recorded_results_round_trip_and_edit(tmp_path: Path, activity: str) -> None:
     """Preserve independent targets, results and multiline notes through edits."""
     payload: dict[str, object] = {
-        "day": "2026-10-06",
+        "day": date.today().isoformat(),
         "activity": activity,
         "status": "completed",
         "duration_min": 45,
@@ -69,7 +70,7 @@ def test_invalid_recorded_stats_are_rejected(
 ) -> None:
     """Reject negative, nonfinite and out-of-range stats on create and update."""
     with TestClient(create_app(tmp_path / "stats.db")) as client:
-        payload = {"day": "2026-10-06", "activity": "easy_run"}
+        payload = {"day": date.today().isoformat(), "activity": "easy_run"}
         identifier = client.post("/api/sessions", json=payload).json()["id"]
         invalid = {**payload, field: value}
         assert client.post("/api/sessions", json=invalid).status_code == 422
@@ -79,7 +80,11 @@ def test_invalid_recorded_stats_are_rejected(
 def test_unknown_and_zero_results_remain_distinct(tmp_path: Path) -> None:
     """Permit completion with no stats and preserve explicitly recorded zeroes."""
     with TestClient(create_app(tmp_path / "stats.db")) as client:
-        payload = {"day": "2026-10-06", "activity": "hike", "status": "completed"}
+        payload = {
+            "day": date.today().isoformat(),
+            "activity": "hike",
+            "status": "completed",
+        }
         saved = client.post("/api/sessions", json=payload).json()
         fields = [
             "actual_duration_min",

@@ -35,7 +35,7 @@ def _planning_date() -> date:
     Returns
     -------
     date
-        Inclusive date cutoff for generating or accepting suggestions.
+        Inclusive date cutoff for saving upcoming workouts and suggestions.
     """
     return date.today()
 
@@ -90,7 +90,8 @@ def create_session(path: Path, session: Session) -> Session:
     Raises
     ------
     ValueError
-        If an identifier is supplied or metrics are outside their allowed ranges.
+        If an identifier is supplied, metrics are invalid, or an upcoming workout
+        is dated before today.
     OSError
         If the database directory cannot be created.
     sqlite3.Error
@@ -103,8 +104,15 @@ def create_session(path: Path, session: Session) -> Session:
         return save_session(conn, session)
 
 
+def _validate_planning_day(day: date, status: Status) -> None:
+    """Allow upcoming workouts only from the host's current local date onward."""
+    if status in (Status.PLANNED, Status.CONFIRMED) and day < _planning_date():
+        raise ValueError("Planned and confirmed activities must be dated today or later")
+
+
 def _validate_session(session: Session) -> None:
-    """Validate optional workout metrics for both creation and editing."""
+    """Validate workout dates and optional metrics for creation and editing."""
+    _validate_planning_day(session.day, session.status)
     validate_zone_target(session.hr_zone_min, session.hr_zone_max)
     for name, value in (
         ("actual_duration_min", session.actual_duration_min),
@@ -127,8 +135,8 @@ def _validate_session(session: Session) -> None:
 def update_session(path: Path, session_id: int, session: Session) -> Session:
     """Replace a saved workout, preserving its identifier and all other records.
 
-    Raise LookupError for missing records and ValueError for invalid metrics or
-    a body-supplied identifier. The update is committed in one transaction.
+    Raise LookupError for missing records and ValueError for invalid dates, metrics
+    or a body-supplied identifier. The update is committed in one transaction.
     """
     _validate_session(session)
     if session.id is not None:
@@ -138,9 +146,12 @@ def update_session(path: Path, session_id: int, session: Session) -> Session:
 
 
 def change_session_status(path: Path, session_id: int, status: Status) -> Session:
-    """Commit a status-only update, raising LookupError for a missing workout."""
+    """Update status, rejecting past upcoming workouts and missing identifiers."""
     with closing(connect(path)) as conn, conn:
-        return set_session_status(conn, session_id, status)
+        # Validate while the write lock is held; failures roll back the status change.
+        session = set_session_status(conn, session_id, status)
+        _validate_planning_day(session.day, session.status)
+        return session
 
 
 def remove_session(path: Path, session_id: int) -> None:

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import date
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -80,7 +81,9 @@ def smoke_test(package: Path) -> None:
                         assert response.status == 200
                 request = Request(
                     f"{url}/api/sessions",
-                    data=json.dumps({"day": "2026-10-18", "activity": "gym"}).encode(),
+                    data=json.dumps(
+                        {"day": date.today().isoformat(), "activity": "gym"}
+                    ).encode(),
                     headers={"Content-Type": "application/json"},
                 )
                 with urlopen(request, timeout=5) as response:
