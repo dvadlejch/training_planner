@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from "react";
-import { activities, statuses, type Session, type SessionInput } from "../api/types";
+import { activities, statuses, muscleGroupCategories, muscleGroupLabel, type MuscleGroup, type Session, type SessionInput } from "../api/types";
 import { localDate } from "../calendar";
 import { activityLabel, runPresets, zoneLabel } from "../running";
 import { activityStats, averagePace, parseDuration } from "../sessionStats";
@@ -31,6 +31,7 @@ export default function SessionForm({
     ? (session.hr_zone_min === null ? "" : `${session.hr_zone_min}-${session.hr_zone_max}`)
     : "2-2");
   const [planEdited, setPlanEdited] = useState(false);
+  const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>(session?.muscle_groups ?? []);
   const [notes, setNotes] = useState(session?.notes ?? "");
   const [results, setResults] = useState({
     actual_duration_min: String(session?.actual_duration_min ?? ""),
@@ -76,6 +77,7 @@ export default function SessionForm({
       elevation_gain_m: optionalNumber(results.elevation_gain_m),
       active_calories_kcal: optionalNumber(results.active_calories_kcal),
       effort: optionalNumber(results.effort), notes,
+      muscle_groups: activity === "gym" ? muscleGroups : [],
     });
   }
 
@@ -104,6 +106,20 @@ export default function SessionForm({
           onChange={(event) => setStatus(event.target.value as SessionInput["status"])}>
           {availableStatuses.map((value) => <option key={value} value={value}>{value}</option>)}
         </select></label>
+        {activity === "gym" && status !== "skipped" && <fieldset className="muscle-groups">
+          <legend>Muscle groups (optional)</legend>
+          <p>Select any combination for this workout.</p>
+          {muscleGroupCategories.map(({ label, groups }) => <div key={label}>
+            <h5>{label}</h5>
+            <div className="muscle-group-options">{groups.map((group) => <label key={group}>
+              <input type="checkbox" name="muscle_groups" value={group}
+                checked={muscleGroups.includes(group)}
+                onChange={(event) => setMuscleGroups((current) => event.target.checked
+                  ? [...current, group] : current.filter((value) => value !== group))} />
+              {muscleGroupLabel(group)}
+            </label>)}</div>
+          </div>)}
+        </fieldset>}
         {planning && <>
           <h5 className="session-section-heading">Training targets</h5>
           <label>Planned duration (min)<input name="duration" type="number" min="0" max="1440" step="1"

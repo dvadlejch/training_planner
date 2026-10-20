@@ -714,7 +714,7 @@ def test_update_session_preserves_identity_and_other_entries(client, status):
     }
     response = client.put(f"/api/sessions/{original['id']}", json=replacement)
     assert response.status_code == 200
-    updated = {**replacement, "id": original["id"]}
+    updated = {**replacement, "id": original["id"], "muscle_groups": []}
     assert response.json() == updated
     assert client.get(
         "/api/sessions", params={"start": "2026-10-05", "end": "2026-11-01"}
@@ -1269,7 +1269,12 @@ def test_midnight_cannot_mix_original_and_replacement_gym_layouts(
     original_gym = [
         s for s in original if s["activity"] == "gym" and s["day"] < "2026-10-12"
     ]
-    extra = next(s for s in current if s["activity"] == "gym" and s not in original)
+    extra = next(
+        s
+        for s in current
+        if s["activity"] == "gym"
+        and s["day"] not in {item["day"] for item in original_gym}
+    )
     assert extra["day"] == "2026-10-11"
     selected = [
         {k: v for k, v in s.items() if k != "id"} for s in original_gym + [extra]

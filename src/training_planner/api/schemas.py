@@ -5,7 +5,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from training_planner.domain.models import Activity, Status
+from training_planner.domain.models import (
+    Activity,
+    GymSplit,
+    MuscleGroup,
+    Status,
+    validate_muscle_groups,
+)
 from training_planner.domain.running import validate_zone_target
 
 
@@ -24,12 +30,15 @@ class SessionInput(BaseModel):
     active_calories_kcal: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     effort: int | None = Field(default=None, ge=1, le=10)
     notes: str = ""
+    muscle_groups: list[MuscleGroup] = Field(default_factory=list)
     hr_zone_min: int | None = Field(default=None, ge=1, le=5)
     hr_zone_max: int | None = Field(default=None, ge=1, le=5)
 
     @model_validator(mode="after")
-    def validate_zones(self):
+    def validate_targets(self) -> "SessionInput":
+        """Check related zone bounds and gym-only muscle selections."""
         validate_zone_target(self.hr_zone_min, self.hr_zone_max)
+        validate_muscle_groups(self.activity, self.muscle_groups)
         return self
 
 
@@ -90,6 +99,21 @@ class ProposalKeyInput(BaseModel):
     activity: Activity
 
 
+class GymSplitInput(BaseModel):
+    """Configure optional accessory groups for each of the three gym sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+    chest: tuple[MuscleGroup, ...] = GymSplit().chest
+    back: tuple[MuscleGroup, ...] = GymSplit().back
+    legs: tuple[MuscleGroup, ...] = GymSplit().legs
+
+    @model_validator(mode="after")
+    def validate_accessories(self) -> "GymSplitInput":
+        """Apply the same unique accessory restriction as domain callers."""
+        GymSplit(chest=self.chest, back=self.back, legs=self.legs)
+        return self
+
+
 class PlanningRequest(BaseModel):
     """Describe a fixed 28-day request; week_start may be any weekday."""
 
@@ -98,6 +122,7 @@ class PlanningRequest(BaseModel):
     weeks: Literal[4] = 4
     targets: TrainingTargetsInput = Field(default_factory=TrainingTargetsInput)
     weekdays: ActivityWeekdaysInput = Field(default_factory=ActivityWeekdaysInput)
+    gym_split: GymSplitInput = Field(default_factory=GymSplitInput)
     excluded: list[ProposalKeyInput] = Field(default_factory=list)
     blocked: set[date] = Field(default_factory=set)
     moves: list[ProposalMoveInput] = Field(default_factory=list)

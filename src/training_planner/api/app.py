@@ -27,6 +27,7 @@ from training_planner.application.services import (
 )
 from training_planner.domain.models import (
     ActivityWeekdays,
+    GymSplit,
     ProposalMove,
     Session,
     TrainingTargets,
@@ -205,6 +206,7 @@ def create_app(
             payload.dismissed,
             targets=TrainingTargets(**payload.targets.model_dump()),
             weekdays=ActivityWeekdays(**payload.weekdays.model_dump()),
+            gym_split=GymSplit(**payload.gym_split.model_dump()),
             excluded={(item.day, item.activity) for item in payload.excluded},
         )
 
@@ -249,6 +251,7 @@ def create_app(
             confirm=payload.confirm,
             targets=TrainingTargets(**payload.targets.model_dump()),
             weekdays=ActivityWeekdays(**payload.weekdays.model_dump()),
+            gym_split=GymSplit(**payload.gym_split.model_dump()),
             excluded={(item.day, item.activity) for item in payload.excluded},
         )
 

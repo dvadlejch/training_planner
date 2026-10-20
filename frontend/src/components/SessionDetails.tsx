@@ -1,4 +1,4 @@
-import type { SessionInput } from "../api/types";
+import { muscleGroupLabel, type SessionInput } from "../api/types";
 import { zoneLabel } from "../running";
 import { activityStats, averagePace } from "../sessionStats";
 
@@ -16,6 +16,9 @@ export default function SessionDetails({ session }: { session: SessionInput }) {
   ];
   const recorded = results.filter(([, value]) => value !== null);
   return <div className="session-details">
+    {session.activity === "gym" && session.muscle_groups?.length > 0 && <section>
+      <h5>Muscle groups</h5><p>{session.muscle_groups.map(muscleGroupLabel).join(", ")}</p>
+    </section>}
     {(session.duration_min != null || session.hr_zone_min != null) && <section>
       <h5>Training targets</h5><dl>
         {session.duration_min != null && <><dt>Planned duration</dt><dd>{session.duration_min} min</dd></>}

@@ -30,7 +30,12 @@ def test_recorded_results_round_trip_and_edit(tmp_path: Path, activity: str) -> 
         assert response.status_code == 201
         saved = response.json()
         identifier = saved.pop("id")
-        assert saved == {**payload, "hr_zone_min": None, "hr_zone_max": None}
+        assert saved == {
+            **payload,
+            "hr_zone_min": None,
+            "hr_zone_max": None,
+            "muscle_groups": [],
+        }
         payload["actual_duration_min"] = 30
         payload["distance_km"] = None
         response = client.put(f"/api/sessions/{identifier}", json=payload)

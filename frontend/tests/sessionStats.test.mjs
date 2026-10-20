@@ -15,6 +15,7 @@ const { averagePace, sessionOverview, parseDuration } = await import(sourceUrl("
 const { default: SessionForm } = await import(sourceUrl("../src/components/SessionForm.tsx"));
 const { default: SessionDetails } = await import(sourceUrl("../src/components/SessionDetails.tsx"));
 const session = {
+  muscle_groups: [],
   id: 1, day: new Date().toLocaleDateString("sv-SE"), activity: "easy_run", status: "completed",
   duration_min: 45, actual_duration_min: 32, distance_km: 5.2,
   average_hr_bpm: 142, elevation_gain_m: 120, active_calories_kcal: 340,
@@ -323,4 +324,62 @@ test("new training status options follow the selected date", async (t) => {
   await change(date, "2099-01-01");
   assert.equal(status.value, "skipped");
   assert.deepEqual(options(), ["planned", "confirmed", "completed", "skipped"]);
+});
+
+// Optional gym targets allow all seven groups and preserve drafts across status/activity changes.
+test("gym muscle targets can be selected, restored, edited and cleared", async (t) => {
+  let submitted;
+  const host = await render(t, SessionForm, {
+    day: session.day, session: { ...session, activity: "gym", status: "planned", muscle_groups: ["chest"] },
+    disabled: false, error: "", onSave: async (value) => { submitted = value; }, onCancel: () => {},
+  });
+  const boxes = () => [...host.querySelectorAll('[name="muscle_groups"]')];
+  const submit = async () => act(async () => host.querySelector("form").requestSubmit());
+  assert.equal(boxes().length, 7);
+  assert.equal(boxes().find((box) => box.value === "chest").checked, true);
+  for (const box of boxes().filter((box) => !box.checked)) await act(async () => box.click());
+  await submit();
+  assert.deepEqual(submitted.muscle_groups, ["chest", "legs", "back", "biceps", "triceps", "shoulders", "abs"]);
+  await change(host.querySelector('[name="status"]'), "skipped");
+  assert.equal(boxes().length, 0);
+  await submit();
+  assert.equal(submitted.muscle_groups.length, 7);
+  await change(host.querySelector('[name="status"]'), "completed");
+  assert.ok(boxes().every((box) => box.checked));
+  await change(host.querySelector('[name="activity"]'), "easy_run");
+  assert.equal(boxes().length, 0);
+  await submit();
+  assert.deepEqual(submitted.muscle_groups, []);
+  await change(host.querySelector('[name="activity"]'), "gym");
+  assert.ok(boxes().every((box) => box.checked));
+  for (const box of boxes()) await act(async () => box.click());
+  await submit();
+  assert.deepEqual(submitted.muscle_groups, []);
+});
+
+// Saved targets are visible with readable labels, including workouts with no other targets.
+test("gym details show muscle groups and omit an empty selection", async (t) => {
+  const host = await render(t, SessionDetails, {
+    session: { ...session, activity: "gym", duration_min: null, hr_zone_min: null,
+      muscle_groups: ["back", "triceps", "abs"] },
+  });
+  assert.ok(host.textContent.includes("Muscle groups"));
+  assert.ok(host.textContent.includes("Back, Triceps, Abs"));
+  for (const status of ["planned", "completed"]) {
+    assert.ok(sessionOverview({ ...session, activity: "gym", status,
+      muscle_groups: ["back", "triceps", "abs"] }).includes("Back, Triceps, Abs"));
+  }
+  const blank = await render(t, SessionDetails, { session: { ...session, activity: "gym" } });
+  assert.ok(!blank.textContent.includes("Muscle groups"));
+});
+
+// The disabled editor must also disable every muscle checkbox while a save is pending.
+test("gym muscle selection respects the disabled editor", async (t) => {
+  const host = await render(t, SessionForm, {
+    day: session.day, session: { ...session, activity: "gym", status: "confirmed" },
+    disabled: true, error: "", onSave: async () => {}, onCancel: () => {},
+  });
+  for (const box of host.querySelectorAll('[name="muscle_groups"]')) {
+    assert.ok(box.matches(":disabled"));
+  }
 });

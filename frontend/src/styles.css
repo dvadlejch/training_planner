@@ -967,3 +967,13 @@ th {
     width: auto;
     margin: 0;
 }
+
+.muscle-groups { grid-column: 1 / -1; min-width: 0; }
+.muscle-groups h5 { margin: 10px 0 6px; }
+.muscle-group-options { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.muscle-group-options label { flex-direction: row; align-items: center; gap: 6px; cursor: pointer; }
+.calendar-editor-fields .muscle-group-options input { width: auto; }
+
+.gym-split-settings { margin-top: 18px; }
+.gym-split-settings > fieldset { margin-bottom: 12px; }
+.gym-split-settings > fieldset > legend { margin: 0 0 6px; }
