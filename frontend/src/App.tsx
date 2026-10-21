@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
+import packageInfo from "../package.json";
 import { acceptProposals, deleteSession, generateProposals, listSessions, saveSession, updateSession, updateSessionStatus } from "./api/client";
 import { type GymSplit, type PlanningRequest, type Session, type SessionInput, type TrainingTargets, type ActivityWeekdays } from "./api/types";
 import WeeklyCalendar from "./components/WeeklyCalendar";
@@ -434,7 +435,10 @@ export default function App(): ReactElement {
         <p className="sidebar-note">Every plan can change.<br />Rest days belong here, too.</p>
         </aside>
       </div>
-      <footer className="app-footer">Built around your life, one day at a time.</footer>
+      <footer className="app-footer">
+        <span>Built around your life, one day at a time.</span>
+        <span>Version {packageInfo.version}</span>
+      </footer>
     </main>
   );
 }

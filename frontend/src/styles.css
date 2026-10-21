@@ -678,6 +678,9 @@ summary {
     border-color: #e7c9b5;
 }
 .app-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
     color: var(--muted);
     font-size: .7rem;
     text-align: center;

@@ -41,6 +41,9 @@ def connect(path: Path = DEFAULT_DB) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
+        # Lock before inspecting the schema so concurrent requests cannot both
+        # decide to add the same column. Commit releases it before normal use.
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             day TEXT NOT NULL,

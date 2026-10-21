@@ -6,6 +6,11 @@ const urls = new Map();
 /** Compile project TS/TSX into importable modules using the existing compiler. */
 export function sourceUrl(path) {
   let url = path instanceof URL ? path : new URL(path, import.meta.url);
+  if (url.pathname.endsWith(".json")) {
+    const data = JSON.parse(readFileSync(url, "utf8"));
+    const code = `export default ${JSON.stringify(data)};`;
+    return `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
+  }
   if (!/\.tsx?$/.test(url.pathname)) {
     url = [".ts", ".tsx"].map((ext) => new URL(`${url.href}${ext}`)).find(existsSync);
   }
