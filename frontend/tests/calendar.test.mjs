@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { sourceUrl } from "./loadSource.mjs";
@@ -1291,4 +1292,13 @@ test("gym split accessories remain optional and settings lock during editing", a
   for (const box of document.querySelectorAll(".gym-split-settings input")) {
     assert.ok(box.matches(":disabled"));
   }
+});
+
+// Keep the package version beside the app title so it is visible without scrolling.
+test("app header displays the current frontend package version", async (t) => {
+  await setup(t);
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const header = document.querySelector(".app-header");
+  assert.ok(header);
+  assert.equal(header.querySelector(".app-version")?.textContent, `Version ${version}`);
 });

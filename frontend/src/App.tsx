@@ -248,7 +248,11 @@ export default function App(): ReactElement {
             <path d="M6 29 17 10l7 12 4-6 7 13H6Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
             <path d="m13 17 4 3 4-3M24 29l-4-7" stroke="currentColor" strokeWidth="1.8" />
           </svg>
-          <div><p className="eyebrow">Adaptive Training Planner</p><h1>Your training calendar</h1></div>
+          <div>
+            <p className="eyebrow">Adaptive Training Planner</p>
+            <h1>Your training calendar</h1>
+            <p className="app-version">Version {packageInfo.version}</p>
+          </div>
         </div>
         <button className="plan-button" onClick={() => {
           if (planningPanel.current) {
@@ -435,10 +439,7 @@ export default function App(): ReactElement {
         <p className="sidebar-note">Every plan can change.<br />Rest days belong here, too.</p>
         </aside>
       </div>
-      <footer className="app-footer">
-        <span>Built around your life, one day at a time.</span>
-        <span>Version {packageInfo.version}</span>
-      </footer>
+      <footer className="app-footer">Built around your life, one day at a time.</footer>
     </main>
   );
 }
